@@ -1,0 +1,44 @@
+{
+  "name": "all_cash_condo",
+  "description": "No loan at all. Exercises the undefined-DSCR path: a lender ratio with no lender must come back None, not zero and not a failure.",
+  "scope": {
+    "address": "88 Harbor St Unit 4B",
+    "strategy": "rental",
+    "purchase_price": 180000,
+    "down_payment_rate": 1.0,
+    "interest_rate": 0.065,
+    "term_years": 30,
+    "closing_cost_rate": 0.02,
+    "rehab_budget": 0,
+    "monthly_rent": 1600,
+    "vacancy_rate": 0.07,
+    "expenses": {
+      "property_taxes_annual": 2400,
+      "insurance_annual": 900,
+      "hoa_annual": 3000,
+      "maintenance_rate": 0.05,
+      "management_rate": 0.08,
+      "capex_reserve_rate": 0.05
+    }
+  },
+  "expected": {
+    "gross_scheduled_income": 19200,
+    "vacancy_loss": 1344.0,
+    "effective_gross_income": 17856.0,
+    "operating_expenses": 8621.28,
+    "net_operating_income": 9234.72,
+    "loan_amount": 0.0,
+    "monthly_payment": 0.0,
+    "annual_debt_service": 0.0,
+    "total_cash_invested": 183600.0,
+    "capex_reserve": 892.8,
+    "annual_cash_flow": 8341.92,
+    "monthly_cash_flow": 695.16,
+    "cap_rate": 0.051304,
+    "cash_on_cash_return": 0.04543529,
+    "debt_service_coverage_ratio": null,
+    "break_even_monthly_rent": 688.434304,
+    "max_allowable_offer": null,
+    "passes_seventy_percent_rule": null
+  }
+}

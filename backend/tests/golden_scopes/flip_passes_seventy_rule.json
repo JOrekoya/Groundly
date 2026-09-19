@@ -1,0 +1,45 @@
+{
+  "name": "flip_passes_seventy_rule",
+  "description": "Flip bought under the 70% ceiling. Holding costs make cash flow deeply negative, which is correct and expected for a flip.",
+  "scope": {
+    "address": "77 Cedar Ct",
+    "strategy": "flip",
+    "purchase_price": 150000,
+    "after_repair_value": 300000,
+    "rehab_budget": 45000,
+    "down_payment_rate": 0.25,
+    "interest_rate": 0.1,
+    "term_years": 30,
+    "closing_cost_rate": 0.02,
+    "monthly_rent": 0,
+    "vacancy_rate": 0.0,
+    "expenses": {
+      "property_taxes_annual": 3000,
+      "insurance_annual": 1500,
+      "hoa_annual": 0,
+      "maintenance_rate": 0.0,
+      "management_rate": 0.0,
+      "capex_reserve_rate": 0.0
+    }
+  },
+  "expected": {
+    "gross_scheduled_income": 0,
+    "vacancy_loss": 0.0,
+    "effective_gross_income": 0.0,
+    "operating_expenses": 4500.0,
+    "net_operating_income": -4500.0,
+    "loan_amount": 112500.0,
+    "monthly_payment": 987.268016,
+    "annual_debt_service": 11847.216196,
+    "total_cash_invested": 85500.0,
+    "capex_reserve": 0.0,
+    "annual_cash_flow": -16347.216196,
+    "monthly_cash_flow": -1362.268016,
+    "cap_rate": -0.03,
+    "cash_on_cash_return": -0.19119551,
+    "debt_service_coverage_ratio": -0.37983607,
+    "break_even_monthly_rent": 1362.268016,
+    "max_allowable_offer": 165000.0,
+    "passes_seventy_percent_rule": true
+  }
+}

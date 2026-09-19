@@ -1,0 +1,44 @@
+{
+  "name": "suburban_duplex_rental",
+  "description": "Bread-and-butter 20%-down rental. Modest positive cash flow, DSCR comfortably above 1.2. The baseline every other fixture varies from.",
+  "scope": {
+    "address": "1420 Elmwood Ave, Springfield",
+    "strategy": "rental",
+    "purchase_price": 300000,
+    "down_payment_rate": 0.2,
+    "interest_rate": 0.07,
+    "term_years": 30,
+    "closing_cost_rate": 0.02,
+    "rehab_budget": 0,
+    "monthly_rent": 2800,
+    "vacancy_rate": 0.05,
+    "expenses": {
+      "property_taxes_annual": 3600,
+      "insurance_annual": 1200,
+      "hoa_annual": 0,
+      "maintenance_rate": 0.05,
+      "management_rate": 0.08,
+      "capex_reserve_rate": 0.05
+    }
+  },
+  "expected": {
+    "gross_scheduled_income": 33600,
+    "vacancy_loss": 1680.0,
+    "effective_gross_income": 31920.0,
+    "operating_expenses": 8949.6,
+    "net_operating_income": 22970.4,
+    "loan_amount": 240000.0,
+    "monthly_payment": 1596.725988,
+    "annual_debt_service": 19160.711861,
+    "total_cash_invested": 66000.0,
+    "capex_reserve": 1596.0,
+    "annual_cash_flow": 2213.688139,
+    "monthly_cash_flow": 184.474012,
+    "cap_rate": 0.076568,
+    "cash_on_cash_return": 0.03354073,
+    "debt_service_coverage_ratio": 1.19882811,
+    "break_even_monthly_rent": 2563.191256,
+    "max_allowable_offer": null,
+    "passes_seventy_percent_rule": null
+  }
+}
