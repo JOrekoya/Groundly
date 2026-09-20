@@ -13,7 +13,7 @@ renamed for clarity every client breaks.
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -262,6 +262,13 @@ class ValuationResponse(BaseModel):
         )
 
 
+class ChatHistoryTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: str = Field(..., max_length=4000)
+
+
 class ChatRequest(BaseModel):
     """One message from the user, plus the deal it is about.
 
@@ -276,6 +283,12 @@ class ChatRequest(BaseModel):
     scope: DealScopeModel
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
+    building_sqft: float | None = Field(default=None, gt=0)
+    beds: int | None = Field(default=None, ge=0)
+    full_baths: int | None = Field(default=None, ge=0)
+    #: Prior turns, oldest first. The server keeps no conversation state, so
+    #: the client sends what the assistant should remember.
+    history: list[ChatHistoryTurn] = Field(default_factory=list, max_length=60)
 
 
 class ChatResponse(BaseModel):
@@ -291,8 +304,14 @@ class ChatResponse(BaseModel):
     metrics: DealMetricsModel
     steps: list[str] = Field(default_factory=list)
     plan_source: str = "router"
-    used_llm_for_planning: bool = False
-    used_llm_for_narration: bool = False
+    used_llm: bool = False
+    tool_calls: list[str] = Field(default_factory=list)
+    provenance_ok: bool = True
+    rejected_figures: list[str] = Field(default_factory=list)
     llm_available: bool = False
     latitude: float | None = None
     longitude: float | None = None
+
+    # Older names, kept so nothing that read them breaks. Both mean used_llm.
+    used_llm_for_planning: bool = False
+    used_llm_for_narration: bool = False

@@ -18,12 +18,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app import agent as agent_module
 from app import narrator as narrator_module
-from app import planner as planner_module
 from app import router as router_module
 from app.executor import Session, execute
 from app.llm import LlmClient
-from app.plan import Clarify, Plan, StepResult, ValueFromComps
+from app.plan import Clarify, Plan, SetField, StepResult, ValueFromComps
 from app.resolver import Geocoder, ResolvedLocation, resolve
 from app.tools.contract import CompStore, EmptyCompStore
 
@@ -32,23 +32,35 @@ from app.tools.contract import CompStore, EmptyCompStore
 class ChatTurn:
     """Everything one message produced.
 
-    ``used_llm_for_planning`` and ``used_llm_for_narration`` are reported
-    separately and shown in the UI, because "no model was involved in this
-    answer" is a claim worth being able to make precisely.
+    ``used_llm`` says whether a model was involved at all, and
+    ``tool_calls`` names what it did. "No model was involved in this answer"
+    is a claim worth being able to make precisely, so it is reported per
+    message rather than assumed.
     """
 
     reply: str
     plan: Plan
     results: tuple[StepResult, ...]
-    used_llm_for_planning: bool
-    used_llm_for_narration: bool
+    used_llm: bool
+    tool_calls: tuple[str, ...] = ()
+    provenance_ok: bool = True
+    rejected_figures: tuple[str, ...] = ()
     resolved_location: ResolvedLocation | None = None
+
+    # Kept for callers that predate the agent. Both mean "a model ran".
+    @property
+    def used_llm_for_planning(self) -> bool:
+        return self.used_llm
+
+    @property
+    def used_llm_for_narration(self) -> bool:
+        return self.used_llm
 
 
 NO_PLANNER_REPLY = (
-    "I did not recognise that as a change or a question I can answer directly. "
-    "Try something like \"change the rate to 7%\", \"what is my cash-on-cash\", "
-    "or \"what is it worth\"."
+    "No model is configured, so I can only handle direct commands right now. "
+    "Try \"change the rate to 7%\", \"what is my cash-on-cash\", or "
+    "\"what is it worth\". Set ANTHROPIC_API_KEY to turn on the assistant."
 )
 
 
@@ -60,6 +72,7 @@ def handle_message(
     llm: LlmClient | None = None,
     geocoder: Geocoder | None = None,
     narrate: bool = True,
+    history: list[dict[str, str]] | None = None,
 ) -> ChatTurn:
     """Run one turn of conversation.
 
@@ -85,33 +98,52 @@ def handle_message(
         session.longitude = resolved.longitude
 
     plan = router_module.route(message)
-    used_llm_for_planning = False
 
+    # With a model available, the model is the interface. The router keeps
+    # one job: exact field changes, which are unambiguous and should move a
+    # slider in a millisecond rather than a model round trip. Everything else
+    # — questions, explanations, valuations, anything conversational — goes
+    # to the agent, which can call tools and talk about what it finds.
+    if llm is not None:
+        fast_path = plan is not None and all(
+            isinstance(step, SetField) for step in plan.steps
+        )
+        if not fast_path:
+            turn = agent_module.run(
+                session,
+                message,
+                llm=llm,
+                store=store,
+                transcript=agent_module.Transcript(history or []),
+            )
+            return ChatTurn(
+                reply=turn.reply,
+                plan=Plan(steps=(), source="planner"),
+                results=(),
+                used_llm=True,
+                tool_calls=tuple(o.call.name for o in turn.tool_calls),
+                provenance_ok=turn.provenance_ok,
+                rejected_figures=turn.rejected_figures,
+                resolved_location=resolved,
+            )
+
+    # No model, or an exact command: the deterministic path.
     if plan is None and resolved is not None and resolved.source != "session":
         # The message named a property and asked for nothing else. Pasting an
-        # address or a coordinate pair has one obvious meaning, so handle it
-        # here rather than spending a model call on it.
+        # address or a coordinate pair has one obvious meaning.
         plan = Plan(steps=(ValueFromComps(),))
 
     if plan is None:
-        if llm is not None:
-            plan = planner_module.plan(llm, message, context=_context(session))
-            used_llm_for_planning = True
-        else:
-            plan = Plan(steps=(Clarify(question=NO_PLANNER_REPLY),), source="router")
+        plan = Plan(steps=(Clarify(question=NO_PLANNER_REPLY),), source="router")
 
     results = execute(session, plan, store=store)
-
-    reply, used_llm_for_narration = narrator_module.narrate(
-        llm if narrate else None, results
-    )
+    reply = narrator_module.deterministic_narration(results)
 
     return ChatTurn(
         reply=reply,
         plan=plan,
         results=tuple(results),
-        used_llm_for_planning=used_llm_for_planning,
-        used_llm_for_narration=used_llm_for_narration,
+        used_llm=False,
         resolved_location=resolved,
     )
 

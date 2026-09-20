@@ -45,6 +45,9 @@ class Session:
     scope: DealScope
     latitude: float | None = None
     longitude: float | None = None
+    building_sqft: float | None = None
+    beds: int | None = None
+    full_baths: int | None = None
     last_valuation: ValuationEstimate | None = None
     history: list[str] = field(default_factory=list)
 

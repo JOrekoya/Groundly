@@ -211,11 +211,21 @@ export async function valueProperty(
 
 // --- Chat --------------------------------------------------------------------
 
+export interface ChatHistoryTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface ChatRequest {
   message: string;
   scope: DealScope;
   latitude?: number | null;
   longitude?: number | null;
+  building_sqft?: number | null;
+  beds?: number | null;
+  full_baths?: number | null;
+  /** Prior turns, oldest first. The server keeps no conversation state. */
+  history?: ChatHistoryTurn[];
 }
 
 /**
@@ -232,8 +242,13 @@ export interface ChatResponse {
   metrics: DealMetrics;
   steps: string[];
   plan_source: "router" | "planner";
-  used_llm_for_planning: boolean;
-  used_llm_for_narration: boolean;
+  /** Whether a model was involved at all. */
+  used_llm: boolean;
+  /** Tools the model called, in order. */
+  tool_calls: string[];
+  /** False when the reply was replaced because it cited an unproduced figure. */
+  provenance_ok: boolean;
+  rejected_figures: string[];
   llm_available: boolean;
   latitude: number | null;
   longitude: number | null;

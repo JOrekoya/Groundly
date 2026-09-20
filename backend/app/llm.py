@@ -37,20 +37,27 @@ class ToolCall:
 
     name: str
     arguments: dict[str, Any]
+    id: str = ""
 
 
 @dataclass(frozen=True)
 class LlmReply:
     """What a model call produced.
 
-    ``tool_calls`` is the planner's real output; ``text`` is the narrator's.
-    Both are present because a single reply can carry both.
+    ``raw_content`` is the assistant turn exactly as the API returned it, kept
+    so an agent loop can append it to the conversation and follow it with tool
+    results. Without it a multi-step turn cannot be continued.
     """
 
     text: str = ""
     tool_calls: tuple[ToolCall, ...] = ()
     stop_reason: str | None = None
     refused: bool = False
+    raw_content: tuple[dict[str, Any], ...] = ()
+
+    @property
+    def wants_tools(self) -> bool:
+        return self.stop_reason == "tool_use" and bool(self.tool_calls)
 
 
 class LlmClient(Protocol):
@@ -113,18 +120,35 @@ class AnthropicClient:
 
         text_parts: list[str] = []
         calls: list[ToolCall] = []
+        raw: list[dict[str, Any]] = []
         for block in response.content:
             if block.type == "text":
                 text_parts.append(block.text)
+                raw.append({"type": "text", "text": block.text})
             elif block.type == "tool_use":
                 # Tool inputs arrive already parsed; never string-match them.
                 arguments = block.input if isinstance(block.input, dict) else {}
-                calls.append(ToolCall(name=block.name, arguments=dict(arguments)))
+                calls.append(
+                    ToolCall(name=block.name, arguments=dict(arguments), id=block.id)
+                )
+                raw.append(
+                    {
+                        "type": "tool_use",
+                        "id": block.id,
+                        "name": block.name,
+                        "input": dict(arguments),
+                    }
+                )
+            elif block.type == "thinking":
+                # Must be echoed back unchanged on the same model to continue
+                # a turn; carry it through untouched.
+                raw.append(block.model_dump())
 
         return LlmReply(
             text="".join(text_parts).strip(),
             tool_calls=tuple(calls),
             stop_reason=response.stop_reason,
+            raw_content=tuple(raw),
         )
 
 

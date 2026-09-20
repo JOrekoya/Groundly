@@ -215,3 +215,8 @@ table.comps .num { text-align: right; font-variant-numeric: tabular-nums; white-
 }
 .chat-input input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .chat-input button.primary { margin-top: 0; }
+.badge-bad { border-color: #5b2323; color: var(--bad); }
+.chat-note-warn code {
+  background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 11px;
+}
+.chat-log { max-height: 420px; }

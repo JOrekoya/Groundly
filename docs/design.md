@@ -79,9 +79,10 @@ groundly/
     app/
       main.py                  ✓ (FastAPI: /api/analyze, /api/value, /api/chat, /api/health)
       schemas.py               ✓ (pydantic models at the HTTP edge only)
+      agent.py                 ✓ (the assistant: tool loop, history, provenance guard)
       plan.py                  ✓ (typed steps; the executor's allow-list)
-      router.py                ✓ (deterministic intent matching; declines rather than guesses)
-      planner.py               ✓ (native tool-calling, strict schemas, validated output)
+      router.py                ✓ (deterministic fast path for exact commands)
+      planner.py               ✓ (older step-picking planner; no-key path)
       resolver.py              ✓ (coordinates, addresses, "this property")
       executor.py              ✓ (runs typed steps; the only thing that changes the deal)
       chat.py                  ✓ (the pipeline: resolve, route, plan, execute, narrate)
@@ -123,7 +124,8 @@ groundly/
       test_backtest.py         ✓ (no-leakage rules and scoring)
       test_valuation_api.py    ✓ (comp store, /api/value, honest refusals)
       test_router.py           ✓ (68: what it matches, and what it must decline)
-      test_chat.py             ✓ (planner validation, narrator guard, pipeline, injection)
+      test_agent.py            ✓ (tool loop, history, the provenance guard)
+      test_chat.py             ✓ (pipeline, injection fencing, engine-only numbers)
       test_chat_api.py         ✓ (/api/chat with no key configured)
   frontend/                    ✓ (Vite + React + TypeScript)
     src/
@@ -171,7 +173,7 @@ so the entire test suite runs offline at every stage.
 | 2 | County data go/no-go — validate real sale data before modelling | **Done** (Cook County IL, Philadelphia PA) |
 | 3 | FastAPI layer and dashboard with live sliders, no LLM in the loop | **Done** |
 | 4 | Weighted nearest-comp baseline (v1) on validated county data | **Done** |
-| 5 | Router, narrator, then the LLM planner — last, not first | **Done** (runs fully without a key) |
+| 5 | An assistant with tools: router for exact commands, agent loop for everything else | **Done** (tested against a fake; needs a key to run live) |
 
 **Step 1 — finance engine.** Pure functions plus the typed deal scope. No web
 server, no data source, no model. Ends when the golden-scope harness passes.
@@ -219,14 +221,19 @@ satisfy the same protocol, so the swap reaches neither the model nor the API.
 planner. The planner is the hardest component and the least load-bearing,
 which is why it is last.
 
-Built and tested entirely without an API key. The router answers every change,
-metric, summary and valuation it recognises with no model call, and the
-response says so per message. The planner uses native tool-calling against six
-strict, closed schemas — one per step type — and its output is validated into
-typed steps before the executor sees it; a call outside the allow-list is
-rejected, and a reply with no valid calls becomes a clarifying question. The
-narrator is discarded if its output contains any number that was not in its
-input. Details in `docs/chat-layer.md`.
+The chat is a real assistant in the CDRT style, not a command parser. With a
+key configured, every message that is not an exact field change goes to an
+agent loop: the model calls tools (read the deal, change a field, value from
+comps, list comps), sees their results, calls more if needed, and writes a
+reply grounded in them. It is expected to explain: what a metric means,
+whether this deal's number is good, what the weakest part is.
+
+The rule that survives is provenance, not silence. Every dollar amount and
+percentage in a reply must trace to a tool result or the deal; a reply that
+cites an unproduced figure gets one correction round and is otherwise
+replaced by the engine's own summary and flagged. The router is kept for exact
+changes so a slider moves in a millisecond rather than a model round trip.
+Details in `docs/chat-layer.md`.
 
 ## Testing approach
 
@@ -269,7 +276,7 @@ Per step, the check that actually settles it:
 | 2 | A county clears explicit volume and completeness thresholds against live data; parsing and joins are tested offline against a fake client |
 | 3 | Drag a slider and watch every number re-derive correctly and instantly; API responses asserted equal to the engine's own output |
 | 4 | Backtest against held-out sales with no leakage: high-confidence median error within 15%, interval coverage between 40% and 60% for an interquartile band, and high-confidence estimates measurably better than low-confidence ones |
-| 5 | Router matched and declined phrasings both pinned; planner output validated against the allow-list with a scripted fake; narrator discarded on any invented number; the whole layer passes with no API key |
+| 5 | Agent loop tested against a scripted model: tools run and results round-trip, history is carried, an invented figure is caught, corrected once, then replaced; the whole layer passes with no API key |
 
 Step 4's second check matters as much as the first. A model that is accurate
 but dishonest about its uncertainty is worse than one that is rough and

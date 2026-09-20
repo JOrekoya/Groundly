@@ -20,15 +20,17 @@ Writes `comps.json`. The API picks it up at startup. Without it the finance
 engine works exactly as before and the valuation endpoint says plainly that it
 has no comps, rather than guessing.
 
-## Configure a model (optional, for chat)
+## Configure a model (for the assistant)
+
+Create a file called `.env` in the repo root:
 
 ```
-export ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Without it the chat panel still answers every change, metric, summary and
-valuation the deterministic router recognises, and says so. With it, messages
-the router cannot match go to a planner and replies may be reworded. Every
+Restart the API. The file is gitignored. Without it, the chat handles exact
+commands and says plainly that no model is configured. With it, the chat is a
+full assistant that reads the deal through tools and explains it. Every
 number comes from Python either way.
 
 ## Every time

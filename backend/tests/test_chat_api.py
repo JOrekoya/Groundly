@@ -71,7 +71,7 @@ class TestChatEndpoint:
         planned. Saying that plainly beats failing."""
         body = say(client, "why does this feel like a bad deal")
         assert body["used_llm_for_planning"] is False
-        assert "did not recognise" in body["reply"]
+        assert "No model is configured" in body["reply"]
 
     def test_reports_whether_a_model_is_configured_at_all(self, client):
         body = say(client, "what is the cap rate")

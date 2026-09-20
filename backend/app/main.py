@@ -89,8 +89,29 @@ def load_cached_comps() -> None:
         print(f"warning: could not load comps from {path}: {exc}")
 
 
+def load_dotenv(path: Path | None = None) -> None:
+    """Read KEY=value lines from a .env file into the environment.
+
+    Only fills in variables that are not already set, so a real exported
+    variable always wins. Exists so a developer can put ANTHROPIC_API_KEY in
+    a gitignored file next to the code rather than exporting it every session.
+    """
+    path = path or Path(".env")
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    load_dotenv()
     load_cached_comps()
     yield
 
@@ -167,9 +188,16 @@ def chat(request: ChatRequest) -> ChatResponse:
         scope=request.scope.to_domain(),
         latitude=request.latitude,
         longitude=request.longitude,
+        building_sqft=request.building_sqft,
+        beds=request.beds,
+        full_baths=request.full_baths,
     )
     turn = handle_message(
-        session, request.message, store=comp_store(), llm=_llm()
+        session,
+        request.message,
+        store=comp_store(),
+        llm=_llm(),
+        history=[t.model_dump() for t in request.history],
     )
     metrics = calculate_deal_metrics(session.scope)
 
@@ -179,11 +207,15 @@ def chat(request: ChatRequest) -> ChatResponse:
         metrics=DealMetricsModel.from_domain(metrics, session.scope),
         steps=[describe(step) for step in turn.plan.steps],
         plan_source=turn.plan.source,
-        used_llm_for_planning=turn.used_llm_for_planning,
-        used_llm_for_narration=turn.used_llm_for_narration,
+        used_llm=turn.used_llm,
+        tool_calls=list(turn.tool_calls),
+        provenance_ok=turn.provenance_ok,
+        rejected_figures=list(turn.rejected_figures),
         llm_available=llm_available(),
         latitude=session.latitude,
         longitude=session.longitude,
+        used_llm_for_planning=turn.used_llm,
+        used_llm_for_narration=turn.used_llm,
     )
 
 
