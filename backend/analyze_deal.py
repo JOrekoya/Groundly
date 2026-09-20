@@ -88,9 +88,21 @@ def format_report(scope: DealScope, metrics: object) -> str:
     return "\n".join(lines)
 
 
-def main() -> None:
+def main() -> int:
     args = build_parser().parse_args()
-    scope = DealScope(
+    try:
+        scope = build_scope(args)
+    except ValueError as exc:
+        # A rejected scope is user error, not a crash. Say what is wrong and
+        # exit non-zero rather than dumping a traceback.
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(format_report(scope, calculate_deal_metrics(scope)))
+    return 0
+
+
+def build_scope(args: argparse.Namespace) -> DealScope:
+    return DealScope(
         purchase_price=args.price,
         monthly_rent=args.rent,
         down_payment_rate=args.down,
@@ -107,8 +119,7 @@ def main() -> None:
             hoa_annual=args.hoa,
         ),
     )
-    print(format_report(scope, calculate_deal_metrics(scope)))
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
