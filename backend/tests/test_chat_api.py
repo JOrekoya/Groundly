@@ -37,10 +37,13 @@ def say(client, message: str, **extra):
 
 
 class TestChatEndpoint:
-    def test_answers_a_metric_question(self, client):
+    def test_answers_a_metric_question_with_the_meaning(self, client):
+        """A metric question gets what it means, then the figure, then a verdict."""
         body = say(client, "what is the cap rate")
+        assert body["reply"].startswith("Cap rate is")
         assert "7.66%" in body["reply"]
-        assert body["plan_source"] == "router"
+        assert "solid" in body["reply"]
+        assert body["used_llm"] is False
 
     def test_reports_that_no_model_was_used(self, client):
         """The project's central claim, made checkable per response."""
@@ -66,12 +69,26 @@ class TestChatEndpoint:
     def test_summary_works(self, client):
         assert "cap rate" in say(client, "give me a summary")["reply"]
 
-    def test_unmatched_message_without_a_key_says_so(self, client):
-        """No credentials configured, so an ambiguous message cannot be
-        planned. Saying that plainly beats failing."""
+    def test_a_question_about_the_deal_is_answered_without_a_model(self, client):
+        """Explanations come from rules and the engine, not a model."""
         body = say(client, "why does this feel like a bad deal")
-        assert body["used_llm_for_planning"] is False
-        assert "No model is configured" in body["reply"]
+        assert body["used_llm"] is False
+        assert body["tool_calls"] == ["explain"]
+        assert "deal" in body["reply"].lower()
+        assert "cap rate" in body["reply"].lower()
+
+    def test_a_beginner_walkthrough_uses_the_real_numbers(self, client):
+        body = say(client, "explain what all these numbers mean")
+        assert "$300,000" in body["reply"]
+        assert "$1,597" in body["reply"]
+        assert "cap rate" in body["reply"].lower()
+        assert "DSCR" in body["reply"]
+
+    def test_a_truly_unmatched_message_says_what_it_can_do(self, client):
+        body = say(client, "tell me about the weather in Chicago")
+        assert body["used_llm"] is False
+        assert "did not follow" in body["reply"]
+        assert "help" in body["reply"]
 
     def test_reports_whether_a_model_is_configured_at_all(self, client):
         body = say(client, "what is the cap rate")

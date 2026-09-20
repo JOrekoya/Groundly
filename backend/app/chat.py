@@ -19,11 +19,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app import agent as agent_module
+from app import explain as explain_module
 from app import narrator as narrator_module
 from app import router as router_module
 from app.executor import Session, execute
 from app.llm import LlmClient
-from app.plan import Clarify, Plan, SetField, StepResult, ValueFromComps
+from app.plan import Clarify, Plan, SetField, ShowComps, StepResult, ValueFromComps
 from app.resolver import Geocoder, ResolvedLocation, resolve
 from app.tools.contract import CompStore, EmptyCompStore
 
@@ -58,9 +59,10 @@ class ChatTurn:
 
 
 NO_PLANNER_REPLY = (
-    "No model is configured, so I can only handle direct commands right now. "
-    "Try \"change the rate to 7%\", \"what is my cash-on-cash\", or "
-    "\"what is it worth\". Set ANTHROPIC_API_KEY to turn on the assistant."
+    "I did not follow that. I can explain the deal, say whether it is a good "
+    "one, point out the weakest part, explain any number on the page, change a "
+    "field (\"change the rate to 6.5%\"), or value the property from comparable "
+    "sales. Type \"help\" for the full list."
 )
 
 
@@ -132,6 +134,26 @@ def handle_message(
         # The message named a property and asked for nothing else. Pasting an
         # address or a coordinate pair has one obvious meaning.
         plan = Plan(steps=(ValueFromComps(),))
+
+    is_command = plan is not None and any(
+        isinstance(step, (SetField, ValueFromComps, ShowComps)) for step in plan.steps
+    )
+    if not is_command:
+        # Questions are answered from rules and the engine's own figures, and
+        # this runs before a bare metric lookup on purpose: "what does DSCR
+        # mean and is mine ok" deserves the meaning and a verdict, not
+        # "DSCR is 1.20". This is the product's default voice; a model is an
+        # upgrade on top of it.
+        explained = explain_module.answer(session, message)
+        if explained is not None:
+            return ChatTurn(
+                reply=explained,
+                plan=Plan(steps=(), source="router"),
+                results=(),
+                used_llm=False,
+                tool_calls=("explain",),
+                resolved_location=resolved,
+            )
 
     if plan is None:
         plan = Plan(steps=(Clarify(question=NO_PLANNER_REPLY),), source="router")

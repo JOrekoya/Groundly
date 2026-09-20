@@ -106,9 +106,11 @@ def _report_metric(session: Session, step: ShowMetric) -> StepResult:
     note = ""
     if value is None and step.metric == "debt_service_coverage_ratio":
         note = " There is no debt on this deal, so there is nothing to cover."
+    # First letter only: str.capitalize would turn DSCR into Dscr.
+    label = step.label[:1].upper() + step.label[1:]
     return StepResult(
         step=step,
-        message=f"{step.label.capitalize()} is {rendered}.{note}",
+        message=f"{label} is {rendered}.{note}",
         data={"metric": step.metric, "value": value},
     )
 

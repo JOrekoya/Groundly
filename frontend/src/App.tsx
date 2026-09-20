@@ -16,6 +16,7 @@ import {
 } from "./api/client";
 import { ChatPanel } from "./components/ChatPanel";
 import { DealDashboard } from "./components/DealDashboard";
+import { Guide } from "./components/Guide";
 import { ScopeSliders } from "./components/ScopeSliders";
 import { ValuationPanel } from "./components/ValuationPanel";
 
@@ -93,6 +94,8 @@ export default function App() {
           )}
         </div>
       </header>
+
+      <Guide />
 
       <main className="layout">
         <div className="column">

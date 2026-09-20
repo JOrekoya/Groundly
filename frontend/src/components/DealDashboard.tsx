@@ -53,23 +53,25 @@ export function DealDashboard({ metrics }: { metrics: DealMetrics }) {
           label="Monthly cash flow"
           value={money(metrics.monthly_cash_flow)}
           tone={metrics.monthly_cash_flow >= 0 ? "good" : "bad"}
+          note="what's left each month after every bill"
         />
         <Tile
           label="Cap rate"
           value={`${(metrics.cap_rate * 100).toFixed(2)}%`}
-          note="NOI ÷ purchase price"
+          tone={metrics.cap_rate >= 0.06 ? "good" : metrics.cap_rate >= 0.04 ? undefined : "bad"}
+          note="how well the building earns, ignoring the loan"
         />
         <Tile
           label="Cash-on-cash"
           value={coc === null ? "n/a" : `${(coc * 100).toFixed(2)}%`}
-          tone={coc === null ? "muted" : coc >= 0 ? "good" : "bad"}
-          note={coc === null ? "no cash invested" : undefined}
+          tone={coc === null ? "muted" : coc >= 0.08 ? "good" : coc >= 0 ? undefined : "bad"}
+          note={coc === null ? "no cash invested" : "yearly return on the cash you put in"}
         />
         <Tile
           label="DSCR"
           value={dscr === null ? "n/a" : dscr.toFixed(2)}
           tone={ratioTone(dscr, 1.2)}
-          note={dscr === null ? "no debt" : "lenders want 1.20+"}
+          note={dscr === null ? "no loan, so not applicable" : "times the profit covers the mortgage"}
         />
         <Tile
           label="Break-even rent"
@@ -78,11 +80,12 @@ export function DealDashboard({ metrics }: { metrics: DealMetrics }) {
               ? "n/a"
               : money(metrics.break_even_monthly_rent)
           }
-          note="rent where cash flow is zero"
+          note="the rent at which you'd make nothing"
         />
         <Tile
-          label="Monthly P&I"
+          label="Mortgage payment"
           value={money(metrics.monthly_payment)}
+          note="principal and interest, each month"
         />
       </div>
 

@@ -79,7 +79,8 @@ groundly/
     app/
       main.py                  ✓ (FastAPI: /api/analyze, /api/value, /api/chat, /api/health)
       schemas.py               ✓ (pydantic models at the HTTP edge only)
-      agent.py                 ✓ (the assistant: tool loop, history, provenance guard)
+      explain.py               ✓ (rule-based explanations; the default voice)
+      agent.py                 ✓ (optional LLM assistant: tool loop, provenance guard)
       plan.py                  ✓ (typed steps; the executor's allow-list)
       router.py                ✓ (deterministic fast path for exact commands)
       planner.py               ✓ (older step-picking planner; no-key path)
@@ -124,13 +125,15 @@ groundly/
       test_backtest.py         ✓ (no-leakage rules and scoring)
       test_valuation_api.py    ✓ (comp store, /api/value, honest refusals)
       test_router.py           ✓ (68: what it matches, and what it must decline)
+      test_explain.py          ✓ (matching, thresholds, and provenance of every answer)
       test_agent.py            ✓ (tool loop, history, the provenance guard)
       test_chat.py             ✓ (pipeline, injection fencing, engine-only numbers)
       test_chat_api.py         ✓ (/api/chat with no key configured)
   frontend/                    ✓ (Vite + React + TypeScript)
     src/
       components/
-        ChatPanel.tsx            ✓ (talk to the deal; badge per reply says if a model ran)
+        ChatPanel.tsx            ✓ (talk to the deal; badge per reply says what answered)
+        Guide.tsx                ✓ (collapsible how-this-page-works, for first-timers)
         DealDashboard.tsx        ✓ (headline tiles, 70% rule verdict)
         CompTable.tsx            ✓ (the comps used, and how much each counted)
         CompMap.tsx                (deferred; needs a mapping dependency)
@@ -173,7 +176,7 @@ so the entire test suite runs offline at every stage.
 | 2 | County data go/no-go — validate real sale data before modelling | **Done** (Cook County IL, Philadelphia PA) |
 | 3 | FastAPI layer and dashboard with live sliders, no LLM in the loop | **Done** |
 | 4 | Weighted nearest-comp baseline (v1) on validated county data | **Done** |
-| 5 | An assistant with tools: router for exact commands, agent loop for everything else | **Done** (tested against a fake; needs a key to run live) |
+| 5 | Chat: rule-based explanations by default, an LLM assistant as an optional upgrade | **Done** (works fully with no key) |
 
 **Step 1 — finance engine.** Pure functions plus the typed deal scope. No web
 server, no data source, no model. Ends when the golden-scope harness passes.
@@ -221,12 +224,18 @@ satisfy the same protocol, so the swap reaches neither the model nor the API.
 planner. The planner is the hardest component and the least load-bearing,
 which is why it is last.
 
-The chat is a real assistant in the CDRT style, not a command parser. With a
-key configured, every message that is not an exact field change goes to an
-agent loop: the model calls tools (read the deal, change a field, value from
-comps, list comps), sees their results, calls more if needed, and writes a
-reply grounded in them. It is expected to explain: what a metric means,
-whether this deal's number is good, what the weakest part is.
+The default voice is a rule-based explanation layer: what each metric means,
+whether this deal's number is good against the bands investors use, what the
+weakest part is, what would help. Templates filled with the engine's real
+figures. It answers a beginner's questions with no model and no cost per
+message, which is what lets the product ship to strangers without funding
+their conversations.
+
+An LLM assistant is an optional upgrade on top. With a key configured, every
+message that is not an exact field change goes to an agent loop: the model
+calls tools (read the deal, change a field, value from comps, list comps),
+sees their results, calls more if needed, and writes a reply grounded in them.
+It handles what rules cannot: novel questions, comparisons, back-and-forth.
 
 The rule that survives is provenance, not silence. Every dollar amount and
 percentage in a reply must trace to a tool result or the deal; a reply that

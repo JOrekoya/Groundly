@@ -384,9 +384,8 @@ class TestPipeline:
         handle_message(session, "change rate to 8%", narrate=False)
         turn = handle_message(session, "what is the monthly payment", narrate=False)
         assert session.scope.interest_rate == pytest.approx(0.08)
-        assert turn.results[0].data["value"] == pytest.approx(
-            session.metrics.monthly_payment
-        )
+        # The explanation quotes the engine's figure for the changed deal.
+        assert f"${session.metrics.monthly_payment:,.0f}" in turn.reply
 
 
 class TestUntrustedContent:

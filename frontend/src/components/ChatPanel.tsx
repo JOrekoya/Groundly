@@ -42,9 +42,10 @@ interface Props {
 const SUGGESTIONS = [
   "explain what all these numbers mean",
   "is this a good deal?",
+  "what's the weakest part?",
+  "how do I fix that?",
   "what does DSCR mean and is mine ok?",
   "what if I put down 25%",
-  "what's the weakest part of this deal?",
 ];
 
 const TOOL_LABELS: Record<string, string> = {
@@ -52,18 +53,20 @@ const TOOL_LABELS: Record<string, string> = {
   set_field: "changed a field",
   value_from_comps: "valued from comps",
   list_comps: "listed comps",
+  explain: "explained from the calculator",
 };
 
 function Badge({ message }: { message: Message }) {
   if (message.role !== "assistant" || message.error) return null;
 
   if (!message.usedLlm) {
+    const what = message.toolCalls?.includes("explain")
+      ? "from the calculator"
+      : (message.steps ?? []).join(", ");
     return (
       <span className="badge badge-deterministic">
         no model
-        {message.steps && message.steps.length > 0 && (
-          <em> — {message.steps.join(", ")}</em>
-        )}
+        {what && <em> — {what}</em>}
       </span>
     );
   }
@@ -152,9 +155,9 @@ export function ChatPanel({ scope, onScope, location, onLocation }: Props) {
       <div className="chat-head">
         <h2>Ask the deal</h2>
         {llmAvailable === false && (
-          <span className="chat-note chat-note-warn">
-            No model configured. Set <code>ANTHROPIC_API_KEY</code> and restart
-            the API to turn on the assistant. Direct commands still work.
+          <span className="chat-note">
+            Answers come straight from the calculator. An optional AI upgrade is
+            available with an API key; see docs/running.md.
           </span>
         )}
       </div>
@@ -162,8 +165,8 @@ export function ChatPanel({ scope, onScope, location, onLocation }: Props) {
       <div className="chat-log">
         {messages.length === 0 && (
           <p className="chat-empty">
-            Ask anything about this deal. The assistant reads the numbers from
-            the engine and explains them; it cannot make a figure up.
+            New to this? Start with the first suggestion below. Every figure in
+            every answer comes from the calculator, never guessed.
           </p>
         )}
         {messages.map((message, index) => (

@@ -220,3 +220,17 @@ table.comps .num { text-align: right; font-variant-numeric: tabular-nums; white-
   background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 11px;
 }
 .chat-log { max-height: 420px; }
+
+.guide { margin-bottom: 20px; padding: 0; overflow: hidden; }
+.guide-toggle {
+  width: 100%; text-align: left; font: inherit; font-size: 13px; font-weight: 600;
+  background: none; border: none; color: var(--text); padding: 14px 18px;
+  cursor: pointer; display: flex; gap: 10px; align-items: center;
+}
+.guide-toggle:hover { color: var(--accent); }
+.guide-body {
+  padding: 0 18px 16px; display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+.guide-section strong { display: block; font-size: 12px; margin-bottom: 4px; color: var(--accent); }
+.guide-section p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }

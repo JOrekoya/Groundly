@@ -29,6 +29,7 @@ from typing import Any
 from app.executor import Session, _format_metric
 from app.finance.engine import calculate_deal_metrics
 from app.llm import LlmClient, LlmReply, ToolCall, as_untrusted_data
+from app.finance.engine import SEVENTY_PERCENT_RULE
 from app.models.baseline_comp_model import (
     InsufficientComps,
     SubjectProperty,
@@ -228,6 +229,9 @@ def _deal_snapshot(session: Session) -> dict[str, Any]:
             "rates_are_fractions": "0.0766 means 7.66%",
             "dscr_none_means": "no debt on the deal, so not applicable",
         },
+        # Named constants the engine uses. Listed so "the 70% rule" reads as a
+        # rule's name, not an invented figure.
+        "constants": {"seventy_percent_rule": SEVENTY_PERCENT_RULE},
     }
 
 
@@ -363,7 +367,9 @@ def allowed_figures(sources: list[dict[str, Any]]) -> set[float]:
 
     allowed: set[float] = set()
     for number in raw:
-        candidates = {number, number * 100}
+        # A negative figure renders with the sign outside the matched digits:
+        # "-23.8%" is matched as "23.8%". Allow the magnitude too.
+        candidates = {number, number * 100, abs(number), abs(number) * 100}
         for base in list(candidates):
             for digits in (0, 1, 2):
                 candidates.add(round(base, digits))
