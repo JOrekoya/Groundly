@@ -244,6 +244,35 @@ replaced by the engine's own summary and flagged. The router is kept for exact
 changes so a slider moves in a millisecond rather than a model round trip.
 Details in `docs/chat-layer.md`.
 
+## Where things stand (2026-09-20)
+
+All five build steps are done and pushed. The product runs fully with no
+API key: finance engine, two validated counties, a backtested comp model, a
+dashboard with live sliders, and a chat that explains the deal from rules.
+514 tests pass in about two seconds with no network. `docs/running.md` says
+how to start it.
+
+**Open items, roughly in the order they are worth doing:**
+
+- **First real user test.** Joseph has used the chat once as a beginner and
+  found three issues, all fixed. More sessions like that are the best next
+  input; wording that does not land for a first-timer is a bug.
+- **Live model run.** The LLM assistant (`app/agent.py`) is tested only
+  against a scripted fake. Nobody has run it against a real key. The first
+  live session should be a short eval of a dozen real questions.
+- **Chat does not carry square footage** to valuation, so "what is it worth"
+  in chat values on raw price. The valuation panel, which does carry it, is
+  sharper.
+- **No geocoder.** Coordinates and "this property" resolve; a typed street
+  address does not.
+- **No frontend tests.** The React layer is checked by `tsc` and by eye.
+- **No rent estimation.** Sale prices only. Phase 2's rent regressor needs a
+  data source that does not yet exist.
+- **No Postgres, no CompMap, no FRED puller.** Deliberate deferrals; see
+  `docs/valuation-model.md`.
+- The older step-picking planner and narrator (`planner.py`, `narrator.py`)
+  are superseded by `explain.py` and `agent.py` and could be retired.
+
 ## Testing approach
 
 **The suite runs after every change, not at the end of a task.** It is
