@@ -11,3 +11,11 @@ dev = ["pytest>=8.0"]
 [tool.pytest.ini_options]
 pythonpath = ["backend"]
 testpaths = ["backend/tests"]
+
+[tool.pyright]
+# The app package lives under backend/, not at the repo root, so a type
+# checker started from the root cannot resolve "from app.state import ...".
+# pytest is told the same thing via pythonpath above, and analyze_deal.py and
+# validate_county_data.py do it at runtime with sys.path.insert. Without this,
+# Pylance flags every first-party import as missing even though the code runs.
+extraPaths = ["backend", "backend/tests"]
