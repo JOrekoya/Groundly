@@ -62,19 +62,27 @@ A set of golden deal-scopes with known correct cap rate, DSCR, and cash-on-cash 
 
 ## Repo structure
 
+Files marked ✓ exist today; the rest are planned. The ingestion layer deviates
+from the original sketch: assessor schemas are entirely county-specific, so
+each county gets its own adapter module rather than a branch inside a shared
+`assessor_puller.py`, with the Socrata transport factored out behind a protocol.
+
 ```
 groundly/
+  pyproject.toml               ✓ (pytest config, pythonpath)
   backend/
+    analyze_deal.py            ✓ (CLI over the finance engine)
+    validate_county_data.py    ✓ (step 2 go/no-go; the only networked script)
     app/
       main.py                  (FastAPI entrypoint)
       router.py                (fast deterministic intent matching)
       planner.py                (LLM planner, native tool-calling, ambiguous input only)
       resolver.py               (property and deictic reference resolution)
       executor.py               (runs typed Plan steps, no LLM)
-      state.py                  (per-session deal scope, typed)
+      state.py                 ✓ (typed DealScope, frozen, validated)
       narrator.py               (thin narrate-only LLM call)
       finance/
-        engine.py                (cap rate, DSCR, cash-on-cash, mortgage math, 70% rule)
+        engine.py              ✓ (cap rate, DSCR, cash-on-cash, mortgage math, 70% rule)
       tools/
         contract.py              (typed tool Protocol + fake for tests)
         comps.py
@@ -86,14 +94,17 @@ groundly/
         arv_regressor.py          (v2, XGBoost, trained offline)
         rent_regressor.py         (v2)
       ingestion/
-        assessor_puller.py
-        zillow_puller.py
-        redfin_puller.py
+        socrata.py             ✓ (HTTP transport behind a Protocol, plus a fake)
+        cook_county.py         ✓ (Cook County IL adapter: sales + characteristics + geo)
+        coverage.py            ✓ (go/no-go scoring, pure)
         fred_puller.py
         scheduler.py
     tests/
-      golden_scopes/             (eval harness fixtures)
-      test_finance_engine.py
+      conftest.py              ✓ (golden-scope loader, shared fixtures)
+      golden_scopes/           ✓ (6 eval harness fixtures)
+      test_finance_engine.py   ✓
+      test_golden_scopes.py    ✓ (the eval harness itself)
+      test_ingestion.py        ✓ (parsing, joining, verdicts; no network)
       test_resolver.py
       test_router.py
   frontend/
@@ -112,7 +123,8 @@ groundly/
     docker-compose.yml           (local Postgres)
     deploy-notes.md              (Vercel, Render, Supabase)
   docs/
-    design.md
+    design.md                  ✓ (this document; the spec)
+    data-validation.md         ✓ (step 2 county findings)
     disclaimer.md
 ```
 
@@ -123,6 +135,99 @@ groundly/
 **Phase 2** — XGBoost ARV regressor once comp volume is proven, rent regression, narrator LLM layer turned on.
 
 **Phase 3** — full agent and tool-calling layer for open-ended questions, expanded eval harness, more counties.
+
+## Build sequence
+
+Five steps, ordered so that each one ends in something runnable and checkable
+by hand. Two properties of this ordering are deliberate: no step needs an LLM
+or an API key until step 5, and network access is confined to data ingestion,
+so the entire test suite runs offline at every stage.
+
+| Step | What | Status |
+|---|---|---|
+| 1 | Deterministic finance engine and golden-scope eval harness | **Done** |
+| 2 | County data go/no-go — validate real sale data before modelling | **Done** |
+| 3 | FastAPI layer and dashboard with live sliders, no LLM in the loop | Not started |
+| 4 | Weighted nearest-comp baseline (v1) on validated county data | Not started |
+| 5 | Router, narrator, then the LLM planner — last, not first | Not started |
+
+**Step 1 — finance engine.** Pure functions plus the typed deal scope. No web
+server, no data source, no model. Ends when the golden-scope harness passes.
+
+**Step 2 — county data go/no-go.** Before any model code, confirm a county can
+actually supply transaction-level sale prices joined to usable property
+characteristics. This is the biggest external risk in the plan, and it comes
+early precisely because a NO-GO would invalidate later work. Findings live in
+`docs/data-validation.md`.
+
+**Step 3 — API and dashboard.** FastAPI over the step 1 engine, with sliders
+that re-derive everything on change. Deal inputs are entered by hand; no
+address lookup yet. This is the first thing that behaves like a product, and
+it is already useful to an investor without a single model call.
+
+**Step 4 — comp baseline.** Ingest validated county data into Postgres, then
+the weighted nearest-comp model. Wire `get_property` and `get_comps` so an
+address populates the scope.
+
+**Step 5 — LLM layer.** Deterministic router first, then narrator, then the
+planner. The planner is the hardest component and the least load-bearing,
+which is why it is last.
+
+## Testing approach
+
+**The suite runs after every change, not at the end of a task.** It is
+deliberately fast — under a second, no network, no database — so there is no
+reason to batch edits and test them together. `python -m pytest` from the repo
+root.
+
+Three layers, each earning its place:
+
+**Anchors** tie the code to the outside world. The mortgage tests assert
+published payment figures ($100k at 6% for 30 years is $599.55) that can be
+confirmed on any public calculator. Everything else in the suite is internal
+consistency; only these say reality agrees.
+
+**Property tests** assert relationships that hold for any deal rather than
+specific numbers: break-even rent fed back into the engine must produce exactly
+zero cash flow; changing the loan must never move the cap rate. These catch
+bugs nobody thought to write a number for.
+
+**Golden scopes** are committed fixtures in `backend/tests/golden_scopes/`,
+one JSON file per deal shape, each with its full expected output. Adding
+coverage means adding a file, not editing test code.
+
+Two standing rules:
+
+- **Expected values are derived independently of the engine** — by hand, by
+  spreadsheet, or by a separate script that does not import it. Values
+  generated by running the engine can only ever confirm it still does what it
+  did, bugs included.
+- **When a test fails, decide which side is wrong before editing either.**
+  Rewriting a fixture to match new output is how a suite quietly stops
+  protecting anything.
+
+Per step, the check that actually settles it:
+
+| Step | How it is verified |
+|---|---|
+| 1 | Golden scopes pass; mortgage payment matches a public calculator to the cent |
+| 2 | A county clears explicit volume and completeness thresholds against live data; parsing and joins are tested offline against a fake client |
+| 3 | Drag a slider and watch every number re-derive correctly and instantly |
+| 4 | Backtest against held-out sales: median absolute percent error, plus interval calibration — an 80% interval must contain truth about 80% of the time |
+| 5 | Router matches and non-matches unit tested; planner asserted on the shape of the tool calls it emits, never on its prose |
+
+Step 4's second check matters as much as the first. A model that is accurate
+but dishonest about its uncertainty is worse than one that is rough and
+truthful, given this project promises a range rather than a point value.
+
+## Network boundary
+
+`backend/validate_county_data.py` is the only script that touches the network,
+and `app/ingestion/socrata.py` is the only module that imports an HTTP client.
+County adapters take a `SocrataClient` protocol and are exercised in tests
+against `FakeSocrataClient`. This mirrors the executor rule from the
+architecture above: the parts that can be pure are pure, and the parts that
+cannot are pushed to the edge behind a protocol with a fake.
 
 ## What the project does, technical version
 
