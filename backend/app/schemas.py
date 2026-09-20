@@ -12,11 +12,18 @@ renamed for clarity every client breaks.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.finance.engine import DealMetrics
+from app.models.baseline_comp_model import (
+    InsufficientComps,
+    SubjectProperty,
+    ValuationEstimate,
+    WeightedComp,
+)
 from app.state import DealScope, OperatingExpenses, Strategy
 
 
@@ -144,3 +151,112 @@ class AnalyzeResponse(BaseModel):
 
     scope: DealScopeModel
     metrics: DealMetricsModel
+
+
+class SubjectPropertyModel(BaseModel):
+    """A property to value."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+    building_sqft: float | None = Field(default=None, gt=0)
+    beds: int | None = Field(default=None, ge=0)
+    full_baths: int | None = Field(default=None, ge=0)
+    year_built: int | None = Field(default=None, ge=1600, le=2100)
+
+    def to_domain(self) -> SubjectProperty:
+        return SubjectProperty(**self.model_dump())
+
+
+class WeightedCompModel(BaseModel):
+    """One comparable sale, and why it counted as much as it did.
+
+    The weight components are sent, not just their product, so the UI can
+    answer "why is that a comp?" without asking the server again.
+    """
+
+    parcel_id: str
+    county: str
+    address: str | None
+    sale_date: date
+    sale_price: int
+    building_sqft: float | None
+    beds: int | None
+    full_baths: int | None
+    year_built: int | None
+    latitude: float
+    longitude: float
+    price_per_sqft: float | None
+
+    distance_miles: float
+    age_months: float
+    distance_weight: float
+    recency_weight: float
+    similarity_weight: float
+    weight: float
+
+    @classmethod
+    def from_domain(cls, weighted: WeightedComp) -> WeightedCompModel:
+        comp = weighted.comp
+        return cls(
+            parcel_id=comp.parcel_id,
+            county=comp.county,
+            address=comp.address,
+            sale_date=comp.sale_date,
+            sale_price=comp.sale_price,
+            building_sqft=comp.building_sqft,
+            beds=comp.beds,
+            full_baths=comp.full_baths,
+            year_built=comp.year_built,
+            latitude=comp.latitude,
+            longitude=comp.longitude,
+            price_per_sqft=comp.price_per_sqft,
+            distance_miles=weighted.distance_miles,
+            age_months=weighted.age_months,
+            distance_weight=weighted.distance_weight,
+            recency_weight=weighted.recency_weight,
+            similarity_weight=weighted.similarity_weight,
+            weight=weighted.weight,
+        )
+
+
+class ValuationResponse(BaseModel):
+    """A valuation, or an honest refusal to give one.
+
+    ``estimate`` is null when the comps were too thin to support a number. The
+    spec is explicit that this is preferable to a falsely precise figure, so
+    the shape of this response makes the refusal a first-class outcome rather
+    than an error.
+    """
+
+    estimated: bool
+    estimate: float | None = None
+    low: float | None = None
+    high: float | None = None
+    price_per_sqft: float | None = None
+    confidence: str | None = None
+    reason: str | None = None
+    notes: list[str] = Field(default_factory=list)
+    comps: list[WeightedCompModel] = Field(default_factory=list)
+
+    @classmethod
+    def from_domain(
+        cls, result: ValuationEstimate | InsufficientComps
+    ) -> ValuationResponse:
+        if isinstance(result, InsufficientComps):
+            return cls(
+                estimated=False,
+                reason=result.reason,
+                comps=[WeightedCompModel.from_domain(w) for w in result.nearest],
+            )
+        return cls(
+            estimated=True,
+            estimate=result.estimate,
+            low=result.low,
+            high=result.high,
+            price_per_sqft=result.price_per_sqft,
+            confidence=result.confidence,
+            notes=list(result.notes),
+            comps=[WeightedCompModel.from_domain(w) for w in result.comps_used],
+        )

@@ -140,3 +140,71 @@ export async function analyze(
 
   return response.json();
 }
+
+// --- Valuation -------------------------------------------------------------
+
+export interface WeightedComp {
+  parcel_id: string;
+  county: string;
+  address: string | null;
+  sale_date: string;
+  sale_price: number;
+  building_sqft: number | null;
+  beds: number | null;
+  full_baths: number | null;
+  year_built: number | null;
+  latitude: number;
+  longitude: number;
+  price_per_sqft: number | null;
+
+  distance_miles: number;
+  age_months: number;
+  distance_weight: number;
+  recency_weight: number;
+  similarity_weight: number;
+  weight: number;
+}
+
+export interface SubjectProperty {
+  latitude: number;
+  longitude: number;
+  building_sqft?: number | null;
+  beds?: number | null;
+  full_baths?: number | null;
+  year_built?: number | null;
+}
+
+/**
+ * A valuation, or an honest refusal.
+ *
+ * `estimated: false` is a successful response, not an error: a property with
+ * no neighbours that sold has no comp-based value, and saying so is the
+ * correct answer rather than a failure to be retried.
+ */
+export interface Valuation {
+  estimated: boolean;
+  estimate: number | null;
+  low: number | null;
+  high: number | null;
+  price_per_sqft: number | null;
+  confidence: "high" | "medium" | "low" | null;
+  reason: string | null;
+  notes: string[];
+  comps: WeightedComp[];
+}
+
+export async function valueProperty(
+  subject: SubjectProperty,
+  signal?: AbortSignal,
+): Promise<Valuation> {
+  const response = await fetch("/api/value", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(subject),
+    signal,
+  });
+  if (!response.ok) {
+    throw new ApiError(`Valuation failed with ${response.status}`);
+  }
+  return response.json();
+}

@@ -16,6 +16,7 @@ import {
 } from "./api/client";
 import { DealDashboard } from "./components/DealDashboard";
 import { ScopeSliders } from "./components/ScopeSliders";
+import { ValuationPanel } from "./components/ValuationPanel";
 
 /**
  * How long to wait after the last change before asking the server.
@@ -89,16 +90,25 @@ export default function App() {
       </header>
 
       <main className="layout">
-        <ScopeSliders scope={scope} onChange={setScope} />
-        {metrics ? (
-          <DealDashboard metrics={metrics} />
-        ) : (
-          <div className="panel placeholder">
-            {error
-              ? "Could not reach the API. Is uvicorn running on port 8000?"
-              : "Loading…"}
-          </div>
-        )}
+        <div className="column">
+          <ScopeSliders scope={scope} onChange={setScope} />
+        </div>
+        <div className="column">
+          {metrics ? (
+            <DealDashboard metrics={metrics} />
+          ) : (
+            <div className="panel placeholder">
+              {error
+                ? "Could not reach the API. Is uvicorn running on port 8000?"
+                : "Loading…"}
+            </div>
+          )}
+          <ValuationPanel
+            onUsePrice={(price) =>
+              setScope((current) => ({ ...current, purchase_price: price }))
+            }
+          />
+        </div>
       </main>
 
       <footer className="footer">

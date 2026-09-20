@@ -73,9 +73,11 @@ groundly/
   pyproject.toml               ✓ (pytest config, pythonpath)
   backend/
     analyze_deal.py            ✓ (CLI over the finance engine)
-    validate_county_data.py    ✓ (step 2 go/no-go; the only networked script)
+    validate_county_data.py    ✓ (step 2 go/no-go)
+    load_comps.py              ✓ (cache county comps for the API)
+    backtest_comp_model.py     ✓ (measure the comp model on real sales)
     app/
-      main.py                  ✓ (FastAPI entrypoint: /api/analyze, /api/health)
+      main.py                  ✓ (FastAPI: /api/analyze, /api/value, /api/health)
       schemas.py               ✓ (pydantic models at the HTTP edge only)
       router.py                (fast deterministic intent matching)
       planner.py                (LLM planner, native tool-calling, ambiguous input only)
@@ -86,13 +88,14 @@ groundly/
       finance/
         engine.py              ✓ (cap rate, DSCR, cash-on-cash, mortgage math, 70% rule)
       tools/
-        contract.py              (typed tool Protocol + fake for tests)
-        comps.py
+        contract.py            ✓ (CompStore Protocol, in-memory and empty stores)
+        comps.py               ✓ (find comps, value a property)
         rates.py
         rehab.py
         geocode.py
       models/
-        baseline_comp_model.py    (v1, weighted nearest comp)
+        baseline_comp_model.py ✓ (v1, weighted nearest comp, always a range)
+        backtest.py            ✓ (accuracy and calibration, pure)
         arv_regressor.py          (v2, XGBoost, trained offline)
         rent_regressor.py         (v2)
       ingestion/
@@ -113,6 +116,9 @@ groundly/
       test_ingestion.py        ✓ (Cook parsing, joining, verdicts; no network)
       test_philadelphia.py     ✓ (Philadelphia adapter and the shared boundary)
       test_api.py              ✓ (in-process TestClient; no server, no network)
+      test_comp_model.py       ✓ (weighting, trimming, refusals, confidence)
+      test_backtest.py         ✓ (no-leakage rules and scoring)
+      test_valuation_api.py    ✓ (comp store, /api/value, honest refusals)
       test_resolver.py
       test_router.py
   frontend/                    ✓ (Vite + React + TypeScript)
@@ -120,8 +126,9 @@ groundly/
       components/
         ChatPanel.tsx              (step 5)
         DealDashboard.tsx        ✓ (headline tiles, 70% rule verdict)
-        CompTable.tsx              (step 4)
-        CompMap.tsx                (step 4)
+        CompTable.tsx            ✓ (the comps used, and how much each counted)
+        CompMap.tsx                (deferred; needs a mapping dependency)
+        ValuationPanel.tsx       ✓ (estimate from comps, or say why not)
         CashFlowBreakdown.tsx    ✓ (income statement, line by line)
         ScopeSliders.tsx         ✓ (the what-if controls)
       api/
@@ -133,6 +140,7 @@ groundly/
   docs/
     design.md                  ✓ (this document; the spec)
     data-validation.md         ✓ (step 2 county findings)
+    valuation-model.md         ✓ (step 4 model, measured accuracy, choices)
     running.md                 ✓ (how to run the stack locally)
     disclaimer.md
 ```
@@ -157,7 +165,7 @@ so the entire test suite runs offline at every stage.
 | 1 | Deterministic finance engine and golden-scope eval harness | **Done** |
 | 2 | County data go/no-go — validate real sale data before modelling | **Done** (Cook County IL, Philadelphia PA) |
 | 3 | FastAPI layer and dashboard with live sliders, no LLM in the loop | **Done** |
-| 4 | Weighted nearest-comp baseline (v1) on validated county data | Not started |
+| 4 | Weighted nearest-comp baseline (v1) on validated county data | **Done** |
 | 5 | Router, narrator, then the LLM planner — last, not first | Not started |
 
 **Step 1 — finance engine.** Pure functions plus the typed deal scope. No web
@@ -186,9 +194,21 @@ disagreeing. `POST /api/analyze` echoes the scope alongside the metrics, so the
 client always displays what the server actually computed rather than what it
 believed it had sent.
 
-**Step 4 — comp baseline.** Ingest validated county data into Postgres, then
-the weighted nearest-comp model. Wire `get_property` and `get_comps` so an
-address populates the scope.
+**Step 4 — comp baseline.** The weighted nearest-comp model over validated
+county data, behind a typed `CompStore` tool contract.
+
+Backtested on real sales in both counties: high-confidence estimates land at a
+median error of 12.6% (Cook) and 13.0% (Philadelphia), with interval coverage
+at 50.1% and 45.4% against a 50% target for an interquartile band. Overall
+median error is near 20%, which is not a number to act on — the value of the
+model is that it grades its own output and the grade holds up, with
+low-confidence estimates near 30% error and labelled as such. Details in
+`docs/valuation-model.md`.
+
+Comps are cached to a flat file and held in memory rather than in Postgres.
+That is a deliberate stopping point: a county's recent single-family sales fit
+in memory comfortably, and the in-memory store and a future Postgres store
+satisfy the same protocol, so the swap reaches neither the model nor the API.
 
 **Step 5 — LLM layer.** Deterministic router first, then narrator, then the
 planner. The planner is the hardest component and the least load-bearing,
@@ -234,7 +254,7 @@ Per step, the check that actually settles it:
 | 1 | Golden scopes pass; mortgage payment matches a public calculator to the cent |
 | 2 | A county clears explicit volume and completeness thresholds against live data; parsing and joins are tested offline against a fake client |
 | 3 | Drag a slider and watch every number re-derive correctly and instantly; API responses asserted equal to the engine's own output |
-| 4 | Backtest against held-out sales: median absolute percent error, plus interval calibration — an 80% interval must contain truth about 80% of the time |
+| 4 | Backtest against held-out sales with no leakage: high-confidence median error within 15%, interval coverage between 40% and 60% for an interquartile band, and high-confidence estimates measurably better than low-confidence ones |
 | 5 | Router matches and non-matches unit tested; planner asserted on the shape of the tool calls it emits, never on its prose |
 
 Step 4's second check matters as much as the first. A model that is accurate

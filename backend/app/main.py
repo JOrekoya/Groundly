@@ -13,7 +13,10 @@ Interactive docs are at /docs once it is up.
 
 from __future__ import annotations
 
+import os
 import time
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -21,13 +24,73 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.finance.engine import calculate_deal_metrics
-from app.schemas import AnalyzeResponse, DealMetricsModel, DealScopeModel
+from app.schemas import (
+    AnalyzeResponse,
+    DealMetricsModel,
+    DealScopeModel,
+    SubjectPropertyModel,
+    ValuationResponse,
+)
+from app.tools.comps import value_property
+from app.tools.contract import CompStore, EmptyCompStore, InMemoryCompStore
 
 #: The Vite dev server. Production origins get added at deploy time rather
 #: than being guessed at here.
 DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 
+#: Comparable sales available to the valuation endpoint.
+#:
+#: Empty until a county extract is loaded, because standing a database up is
+#: not a precondition for the finance engine being useful. With no comps the
+#: valuation endpoint says so plainly rather than guessing, which is the same
+#: answer it gives when a real property has no neighbours that sold.
+_comp_store: CompStore = EmptyCompStore()
+
+#: Where to find a cached comp extract, if one exists. Written by
+#: backend/load_comps.py.
+COMPS_FILE_ENV = "GROUNDLY_COMPS_FILE"
+
+
+def load_comps(comps: list) -> None:
+    """Install a comp set. Called at startup, by a loader script, or by a test."""
+    global _comp_store
+    _comp_store = InMemoryCompStore(comps)
+
+
+def comp_store() -> CompStore:
+    return _comp_store
+
+
+def load_cached_comps() -> None:
+    """Load a comp extract if one is configured.
+
+    Absence is not an error. The finance engine is the product's core and does
+    not need comps, so the service starts and serves /api/analyze either way,
+    and /api/value answers honestly that it has nothing to go on.
+    """
+    configured = os.environ.get(COMPS_FILE_ENV)
+    path = Path(configured) if configured else Path("comps.json")
+    if not path.exists():
+        return
+
+    # Imported lazily: the loader pulls in the ingestion layer, which the API
+    # has no other reason to depend on.
+    from load_comps import load_file
+
+    try:
+        load_comps(load_file(path))
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print(f"warning: could not load comps from {path}: {exc}")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    load_cached_comps()
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Groundly",
     version="0.1.0",
     summary="Deterministic real estate deal analysis.",
@@ -60,7 +123,27 @@ async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     """Liveness check, and a statement of what this service does not do."""
-    return {"status": "ok", "llm_in_request_path": False}
+    store = comp_store()
+    loaded = getattr(store, "comps", [])
+    return {
+        "status": "ok",
+        "llm_in_request_path": False,
+        "comps_loaded": len(loaded),
+    }
+
+
+@app.post("/api/value", response_model=ValuationResponse)
+def value(subject: SubjectPropertyModel) -> ValuationResponse:
+    """Estimate a property's value from comparable sales.
+
+    Answers with ``estimated: false`` and a reason when the comps are too
+    sparse or too far to support a number. That is a successful response, not
+    an error: a refusal is the correct output for a property with no
+    neighbours that sold, and dressing it up as a 404 would push callers
+    toward treating it as a bug to be worked around.
+    """
+    result = value_property(comp_store(), subject.to_domain())
+    return ValuationResponse.from_domain(result)
 
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)
