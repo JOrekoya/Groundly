@@ -75,7 +75,8 @@ groundly/
     analyze_deal.py            ✓ (CLI over the finance engine)
     validate_county_data.py    ✓ (step 2 go/no-go; the only networked script)
     app/
-      main.py                  (FastAPI entrypoint)
+      main.py                  ✓ (FastAPI entrypoint: /api/analyze, /api/health)
+      schemas.py               ✓ (pydantic models at the HTTP edge only)
       router.py                (fast deterministic intent matching)
       planner.py                (LLM planner, native tool-calling, ambiguous input only)
       resolver.py               (property and deictic reference resolution)
@@ -111,26 +112,28 @@ groundly/
       test_golden_scopes.py    ✓ (the eval harness itself)
       test_ingestion.py        ✓ (Cook parsing, joining, verdicts; no network)
       test_philadelphia.py     ✓ (Philadelphia adapter and the shared boundary)
+      test_api.py              ✓ (in-process TestClient; no server, no network)
       test_resolver.py
       test_router.py
-  frontend/
+  frontend/                    ✓ (Vite + React + TypeScript)
     src/
       components/
-        ChatPanel.tsx
-        DealDashboard.tsx
-        CompTable.tsx
-        CompMap.tsx
-        CashFlowBreakdown.tsx
-        ScopeSliders.tsx
+        ChatPanel.tsx              (step 5)
+        DealDashboard.tsx        ✓ (headline tiles, 70% rule verdict)
+        CompTable.tsx              (step 4)
+        CompMap.tsx                (step 4)
+        CashFlowBreakdown.tsx    ✓ (income statement, line by line)
+        ScopeSliders.tsx         ✓ (the what-if controls)
       api/
-        client.ts
-      App.tsx
+        client.ts                ✓ (typed client; computes nothing)
+      App.tsx                    ✓ (holds scope, debounces, aborts stale requests)
   infra/
     docker-compose.yml           (local Postgres)
     deploy-notes.md              (Vercel, Render, Supabase)
   docs/
     design.md                  ✓ (this document; the spec)
     data-validation.md         ✓ (step 2 county findings)
+    running.md                 ✓ (how to run the stack locally)
     disclaimer.md
 ```
 
@@ -153,7 +156,7 @@ so the entire test suite runs offline at every stage.
 |---|---|---|
 | 1 | Deterministic finance engine and golden-scope eval harness | **Done** |
 | 2 | County data go/no-go — validate real sale data before modelling | **Done** (Cook County IL, Philadelphia PA) |
-| 3 | FastAPI layer and dashboard with live sliders, no LLM in the loop | Not started |
+| 3 | FastAPI layer and dashboard with live sliders, no LLM in the loop | **Done** |
 | 4 | Weighted nearest-comp baseline (v1) on validated county data | Not started |
 | 5 | Router, narrator, then the LLM planner — last, not first | Not started |
 
@@ -173,6 +176,15 @@ boundary rather than one county's quirks. Findings live in
 that re-derive everything on change. Deal inputs are entered by hand; no
 address lookup yet. This is the first thing that behaves like a product, and
 it is already useful to an investor without a single model call.
+
+The dashboard sends the whole scope on every change and renders what comes
+back. It never computes a financial figure locally. A localhost round trip
+costs one to two milliseconds, well under the threshold where a drag stops
+feeling live, so there is no reason to keep a second copy of the math in
+TypeScript — and a second copy is exactly how the browser and the engine start
+disagreeing. `POST /api/analyze` echoes the scope alongside the metrics, so the
+client always displays what the server actually computed rather than what it
+believed it had sent.
 
 **Step 4 — comp baseline.** Ingest validated county data into Postgres, then
 the weighted nearest-comp model. Wire `get_property` and `get_comps` so an
@@ -221,7 +233,7 @@ Per step, the check that actually settles it:
 |---|---|
 | 1 | Golden scopes pass; mortgage payment matches a public calculator to the cent |
 | 2 | A county clears explicit volume and completeness thresholds against live data; parsing and joins are tested offline against a fake client |
-| 3 | Drag a slider and watch every number re-derive correctly and instantly |
+| 3 | Drag a slider and watch every number re-derive correctly and instantly; API responses asserted equal to the engine's own output |
 | 4 | Backtest against held-out sales: median absolute percent error, plus interval calibration — an 80% interval must contain truth about 80% of the time |
 | 5 | Router matches and non-matches unit tested; planner asserted on the shape of the tool calls it emits, never on its prose |
 
