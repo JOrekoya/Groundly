@@ -297,3 +297,44 @@ class TestProvenance:
         for q in self.QUESTIONS:
             text = answer(session(), q) or ""
             assert not re.search(r"\{|\}|\bNone\b|\bnan\b", text), q
+
+
+class TestFromRealUse:
+    """Three things a first real test session surfaced."""
+
+    def test_absurd_inputs_are_called_out_not_praised(self):
+        """Dragging the price to its floor gave a 92% cap rate that the rules
+        called 'high' and 'a good deal'. A beginner would learn the wrong
+        lesson from that."""
+        s = session(purchase_price=25_000)
+        for q in ("is this a good deal?", "explain what all this means",
+                  "what's the weakest part", "how do I fix that"):
+            text = answer(s, q)
+            assert text is not None
+            assert "do not look like a real property" in text, q
+            assert "looks like a good deal" not in text, q
+
+    def test_a_plausible_but_strong_deal_is_not_flagged(self):
+        text = answer(session(purchase_price=160_000), "is this a good deal?")
+        assert text is not None
+        assert "do not look like a real property" not in text
+
+    def test_no_concern_is_not_presented_as_a_concern(self):
+        """When everything scores well, "the biggest concern: it clears a
+        healthy $930 a month" reads absurdly."""
+        text = answer(session(purchase_price=160_000), "is this a good deal?")
+        assert text is not None
+        assert "biggest concern" not in text
+        assert "Nothing here is a real concern" in text
+
+    def test_location_question_without_a_location(self):
+        text = answer(session(), "is this chicago or philadelphia")
+        assert text is not None
+        assert "no location yet" in text
+
+    def test_location_question_with_a_location(self):
+        s = session()
+        s.latitude, s.longitude = 41.9484, -87.6553
+        text = answer(s, "where is this property")
+        assert text is not None
+        assert "Cook County" in text

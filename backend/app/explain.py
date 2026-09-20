@@ -376,6 +376,32 @@ def assess_seventy(session: Session) -> Assessment | None:
     )
 
 
+#: Above this, the numbers stop describing a real property. Rentals almost
+#: never earn more than 15-20% of their price a year; a figure like 90% means
+#: the price slider is far too low for the rent, not that the deal is superb.
+IMPLAUSIBLE_CAP_RATE = 0.20
+
+
+def sanity_check(session: Session) -> str | None:
+    """Say so when the inputs cannot be a real property.
+
+    Judging nonsense as if it were real is worse than useless for a beginner:
+    it teaches them that a 90% cap rate is a great deal. This runs before any
+    verdict and replaces it when it fires.
+    """
+    s, m = session.scope, session.metrics
+    if m.cap_rate > IMPLAUSIBLE_CAP_RATE:
+        return (
+            f"These numbers do not look like a real property. A {_pct(m.cap_rate)} cap "
+            f"rate would mean the building earns back {_pct(m.cap_rate)} of its price "
+            f"every year, and real rentals almost never manage more than a fifth of "
+            f"that. Either the price ({_money(s.purchase_price)}) is far too low for "
+            f"the rent ({_money(s.monthly_rent)} a month) or the rent is far too high "
+            f"for the price. Check those two sliders before judging the deal."
+        )
+    return None
+
+
 ASSESSORS: dict[str, Callable[[Session], Assessment | None]] = {
     "monthly_cash_flow": assess_cash_flow,
     "cap_rate": assess_cap_rate,
@@ -400,7 +426,9 @@ def all_assessments(session: Session) -> list[Assessment]:
 def explain_deal(session: Session) -> str:
     """The walkthrough for someone who has never seen this page."""
     s, m = session.scope, session.metrics
-    lines = [
+    warning = sanity_check(session)
+    lines = [warning, ""] if warning else []
+    lines += [
         f"Here is what you are looking at. You would buy this for {_money(s.purchase_price)}, "
         f"putting {s.down_payment_rate:.0%} down ({_money(s.down_payment)}) and borrowing "
         f"{_money(m.loan_amount)} at {s.interest_rate * 100:.2f}% over {s.term_years} years. "
@@ -437,6 +465,10 @@ def explain_deal(session: Session) -> str:
 
 def assess_deal(session: Session) -> str:
     """A verdict, with the reasons."""
+    warning = sanity_check(session)
+    if warning:
+        return warning
+
     found = [a for a in all_assessments(session) if a.metric != "leverage"]
     worst = min(found, key=lambda a: _ORDER[a.level])
     best = max(found, key=lambda a: _ORDER[a.level])
@@ -453,7 +485,13 @@ def assess_deal(session: Session) -> str:
 
     lines = [verdict, ""]
     lines.append(f"The best thing about it: {best.headline} {best.detail}")
-    lines.append(f"The biggest concern: {worst.headline} {worst.detail}")
+    if worst.level in ("good", "strong"):
+        lines.append(
+            f"Nothing here is a real concern. Even the lowest-scoring part, "
+            f"{worst.label}, is fine: {worst.headline.lower()}"
+        )
+    else:
+        lines.append(f"The biggest concern: {worst.headline} {worst.detail}")
     lev = assess_leverage(session)
     if lev is not None and lev.level == "weak":
         lines.append("")
@@ -467,6 +505,9 @@ def assess_deal(session: Session) -> str:
 
 
 def weakest(session: Session) -> str:
+    warning = sanity_check(session)
+    if warning:
+        return warning
     found = all_assessments(session)
     worst = min(found, key=lambda a: _ORDER[a.level])
     if worst.level in ("good", "strong"):
@@ -482,6 +523,9 @@ def weakest(session: Session) -> str:
 
 def improve(session: Session) -> str:
     """Concrete levers, aimed at the weakest metric."""
+    warning = sanity_check(session)
+    if warning:
+        return warning
     s, m = session.scope, session.metrics
     found = all_assessments(session)
     worst = min(found, key=lambda a: _ORDER[a.level])
@@ -566,7 +610,7 @@ def explain_metric(name: str, session: Session) -> str:
 
 Intent = Literal[
     "explain_deal", "assess_deal", "weakest", "improve", "explain_metric",
-    "assess_metric", "leverage", "help",
+    "assess_metric", "leverage", "help", "location",
 ]
 
 METRIC_WORDS: list[tuple[str, str]] = [
@@ -582,6 +626,9 @@ METRIC_WORDS: list[tuple[str, str]] = [
 ]
 
 PATTERNS: list[tuple[str, Intent]] = [
+    (r"\b(where is (this|it|the property)|which (city|county|state|area)|"
+     r"what (city|county|area)|chicago|philadelphia|philly|cook county|"
+     r"location|address|neighbou?rhood)\b", "location"),
     (r"\b(leverage|is (the|my) loan (helping|hurting)|more down or less|smaller down payment)\b", "leverage"),
     (r"\b(weakest|weak\s*(spot|point|part)|biggest (risk|concern|problem)|what.{0,12}wrong|risks?\b|worst part|red flag)", "weakest"),
     (r"\b(improve|fix|make (it|this) better|what (should|could|can) i (change|do)|how (do|can|would) i (fix|improve|help)|levers?)\b", "improve"),
@@ -664,6 +711,21 @@ def answer(session: Session, message: str) -> str | None:
         return f"{lev.headline} {lev.detail}"
     if intent == "help":
         return HELP_TEXT
+    if intent == "location":
+        if session.latitude is None or session.longitude is None:
+            return (
+                "This deal has no location yet. The sliders describe a hypothetical "
+                "property anywhere. To tie it to a real place, paste coordinates like "
+                "\"41.9484, -87.6553\" here, or use the panel on the right to pick "
+                "Chicago or Philadelphia and estimate from nearby sales."
+            )
+        county = "Cook County, Illinois (Chicago area)" if session.latitude > 41 else (
+            "Philadelphia, Pennsylvania"
+        )
+        return (
+            f"The property is at {session.latitude:.4f}, {session.longitude:.4f}, "
+            f"which is in {county}."
+        )
     if intent == "explain_metric" and metric:
         return explain_metric(metric, session)
     if intent == "assess_metric" and metric:

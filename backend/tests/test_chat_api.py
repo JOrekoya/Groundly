@@ -85,7 +85,7 @@ class TestChatEndpoint:
         assert "DSCR" in body["reply"]
 
     def test_a_truly_unmatched_message_says_what_it_can_do(self, client):
-        body = say(client, "tell me about the weather in Chicago")
+        body = say(client, "tell me a joke about spreadsheets")
         assert body["used_llm"] is False
         assert "did not follow" in body["reply"]
         assert "help" in body["reply"]
