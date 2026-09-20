@@ -65,7 +65,8 @@ A set of golden deal-scopes with known correct cap rate, DSCR, and cash-on-cash 
 Files marked ✓ exist today; the rest are planned. The ingestion layer deviates
 from the original sketch: assessor schemas are entirely county-specific, so
 each county gets its own adapter module rather than a branch inside a shared
-`assessor_puller.py`, with the Socrata transport factored out behind a protocol.
+`assessor_puller.py`, with shared record types, the adapter protocol, and each
+transport factored out alongside them.
 
 ```
 groundly/
@@ -94,9 +95,13 @@ groundly/
         arv_regressor.py          (v2, XGBoost, trained offline)
         rent_regressor.py         (v2)
       ingestion/
-        socrata.py             ✓ (HTTP transport behind a Protocol, plus a fake)
-        cook_county.py         ✓ (Cook County IL adapter: sales + characteristics + geo)
-        coverage.py            ✓ (go/no-go scoring, pure)
+        records.py             ✓ (county-neutral CompSale, Sale, field parsers)
+        adapter.py             ✓ (the CountyAdapter Protocol both counties satisfy)
+        socrata.py             ✓ (SoQL transport behind a Protocol, plus a fake)
+        carto.py               ✓ (Carto SQL transport, plus a fake)
+        cook_county.py         ✓ (Cook County IL: 4 Socrata datasets joined on PIN)
+        philadelphia.py        ✓ (Philadelphia PA: 1 Carto table, no join)
+        coverage.py            ✓ (go/no-go scoring, county-neutral and pure)
         fred_puller.py
         scheduler.py
     tests/
@@ -104,7 +109,8 @@ groundly/
       golden_scopes/           ✓ (6 eval harness fixtures)
       test_finance_engine.py   ✓
       test_golden_scopes.py    ✓ (the eval harness itself)
-      test_ingestion.py        ✓ (parsing, joining, verdicts; no network)
+      test_ingestion.py        ✓ (Cook parsing, joining, verdicts; no network)
+      test_philadelphia.py     ✓ (Philadelphia adapter and the shared boundary)
       test_resolver.py
       test_router.py
   frontend/
@@ -146,7 +152,7 @@ so the entire test suite runs offline at every stage.
 | Step | What | Status |
 |---|---|---|
 | 1 | Deterministic finance engine and golden-scope eval harness | **Done** |
-| 2 | County data go/no-go — validate real sale data before modelling | **Done** |
+| 2 | County data go/no-go — validate real sale data before modelling | **Done** (Cook County IL, Philadelphia PA) |
 | 3 | FastAPI layer and dashboard with live sliders, no LLM in the loop | Not started |
 | 4 | Weighted nearest-comp baseline (v1) on validated county data | Not started |
 | 5 | Router, narrator, then the LLM planner — last, not first | Not started |
@@ -157,7 +163,10 @@ server, no data source, no model. Ends when the golden-scope harness passes.
 **Step 2 — county data go/no-go.** Before any model code, confirm a county can
 actually supply transaction-level sale prices joined to usable property
 characteristics. This is the biggest external risk in the plan, and it comes
-early precisely because a NO-GO would invalidate later work. Findings live in
+early precisely because a NO-GO would invalidate later work. Two counties
+cleared it — Cook County, Illinois and Philadelphia, Pennsylvania — and they
+were chosen to be mechanically unalike so that passing both proves the adapter
+boundary rather than one county's quirks. Findings live in
 `docs/data-validation.md`.
 
 **Step 3 — API and dashboard.** FastAPI over the step 1 engine, with sliders
@@ -223,11 +232,25 @@ truthful, given this project promises a range rather than a point value.
 ## Network boundary
 
 `backend/validate_county_data.py` is the only script that touches the network,
-and `app/ingestion/socrata.py` is the only module that imports an HTTP client.
-County adapters take a `SocrataClient` protocol and are exercised in tests
-against `FakeSocrataClient`. This mirrors the executor rule from the
-architecture above: the parts that can be pure are pure, and the parts that
-cannot are pushed to the edge behind a protocol with a fake.
+and `socrata.py` and `carto.py` are the only modules that import an HTTP
+client. Each takes a transport Protocol and is exercised in tests against a
+fake. This mirrors the executor rule from the architecture above: the parts
+that can be pure are pure, and the parts that cannot are pushed to the edge
+behind a protocol with a fake.
+
+## County adapters
+
+Every county satisfies one `CountyAdapter` protocol — `name`, `count_sales`,
+`fetch_comp_sales` — and emits the same county-neutral `CompSale`. Anything
+county-specific, such as Cook County's assessment year and township or
+Philadelphia's zip scoping, lives in an adapter's constructor rather than in
+the protocol.
+
+The two validated counties were picked to be unalike: Socrata against Carto,
+four joined datasets against one denormalized table, publisher-supplied
+arms-length flags against none. Adding the second required no change to the
+coverage scoring or the report, which is the evidence the boundary is real.
+Adding a third county should mean one new module and no edits to shared code.
 
 ## What the project does, technical version
 

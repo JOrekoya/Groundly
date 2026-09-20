@@ -13,15 +13,11 @@ from datetime import date
 import pytest
 
 from app.ingestion.cook_county import (
-    CompSale,
-    Characteristics,
-    Location,
-    Sale,
+    COUNTY_NAME as COOK_NAME,
+)
+from app.ingestion.cook_county import (
+    CookCountyAdapter,
     arms_length_where,
-    fetch_comp_sales,
-    fetch_sales,
-    month_windows,
-    join_sales,
     parse_condo,
     parse_location,
     parse_sale,
@@ -29,6 +25,14 @@ from app.ingestion.cook_county import (
     pin_in_clause,
     property_class_where,
     sales_where,
+)
+from app.ingestion.records import (
+    Characteristics,
+    CompSale,
+    Location,
+    Sale,
+    join_sales,
+    month_windows,
     to_date,
     to_float,
     to_int,
@@ -89,7 +93,7 @@ class TestCharacteristicsParsing:
              "char_land_sf": "6000.0", "char_yrblt": "2005.0"}
         )
         assert chars == Characteristics(
-            pin="1", property_type="single_family", beds=3, full_baths=2,
+            parcel_id="1", property_type="single_family", beds=3, full_baths=2,
             half_baths=1, building_sqft=2295.0, land_sqft=6000.0, year_built=2005,
         )
 
@@ -118,7 +122,7 @@ class TestCharacteristicsParsing:
     def test_location_requires_both_coordinates(self):
         assert parse_location({"pin": "1", "lat": "41.9", "lon": ""}) is None
         assert parse_location({"pin": "1", "lat": "41.9", "lon": "-87.6"}) == Location(
-            pin="1", latitude=41.9, longitude=-87.6
+            parcel_id="1", latitude=41.9, longitude=-87.6
         )
 
 
@@ -146,7 +150,8 @@ class TestJoining:
         comps = join_sales(
             [Sale("1", date(2026, 1, 5), 400_000)],
             {"1": Characteristics("1", "single_family", beds=3, building_sqft=2000.0)},
-            {"1": Location("1", 41.9, -87.6, township_code="70")},
+            {"1": Location("1", 41.9, -87.6, area_code="70")},
+            county=COOK_NAME,
         )
         assert len(comps) == 1
         assert comps[0].beds == 3
@@ -157,6 +162,7 @@ class TestJoining:
             [Sale("1", date(2026, 1, 5), 400_000)],
             {},
             {"1": Location("1", 41.9, -87.6)},
+            county=COOK_NAME,
         )
         assert comps == []
 
@@ -166,13 +172,15 @@ class TestJoining:
             [Sale("1", date(2026, 1, 5), 400_000)],
             {"1": Characteristics("1", "single_family", building_sqft=2000.0)},
             {},
+            county=COOK_NAME,
         )
         assert comps == []
 
     def test_price_per_sqft_is_none_without_size(self):
         comp = CompSale(
-            pin="1", sale_date=date(2026, 1, 5), sale_price=400_000,
-            property_type="condo", latitude=41.9, longitude=-87.6,
+            parcel_id="1", county=COOK_NAME, sale_date=date(2026, 1, 5),
+            sale_price=400_000, property_type="condo",
+            latitude=41.9, longitude=-87.6,
         )
         assert comp.price_per_sqft is None
 
@@ -208,22 +216,22 @@ class TestFetchAgainstAFake:
         )
 
     def test_returns_both_property_types(self, client):
-        comps = fetch_comp_sales(
-            client, since=date(2025, 3, 19), assessment_year=2026, stratify=False
+        comps = CookCountyAdapter(client).fetch_comp_sales(
+            date(2025, 3, 19), limit=100, stratify=False
         )
         assert {c.property_type for c in comps} == {"single_family", "condo"}
 
     def test_condos_would_be_lost_without_the_second_dataset(self, client):
         """Guards the mistake this adapter exists to avoid."""
         client.rows_by_dataset["3r7i-mrz4"] = []
-        comps = fetch_comp_sales(
-            client, since=date(2025, 3, 19), assessment_year=2026, stratify=False
+        comps = CookCountyAdapter(client).fetch_comp_sales(
+            date(2025, 3, 19), limit=100, stratify=False
         )
-        assert [c.pin for c in comps] == ["1"]
+        assert [c.parcel_id for c in comps] == ["1"]
 
     def test_township_filter_reaches_the_query(self, client):
-        fetch_comp_sales(
-            client, since=date(2025, 3, 19), assessment_year=2026, township_code="70"
+        CookCountyAdapter(client, township_code="70").fetch_comp_sales(
+            date(2025, 3, 19), limit=100
         )
         dataset, params = client.calls[0]
         assert dataset == "wvhk-k5uv"
@@ -234,7 +242,7 @@ class TestFetchAgainstAFake:
         characteristics and geo datasets must never be touched."""
         empty = FakeSocrataClient({"wvhk-k5uv": []})
         assert (
-            fetch_comp_sales(empty, since=date(2025, 3, 19), assessment_year=2026)
+            CookCountyAdapter(empty).fetch_comp_sales(date(2025, 3, 19), limit=100)
             == []
         )
         assert {dataset for dataset, _ in empty.calls} == {"wvhk-k5uv"}
@@ -256,7 +264,8 @@ def make_comps(
     """
     return [
         CompSale(
-            pin=str(i),
+            parcel_id=str(i),
+            county="Test County",
             sale_date=date(2026, 1, 1),
             sale_price=sale_price,
             property_type="single_family",
@@ -309,7 +318,8 @@ class TestCoverageVerdict:
     def test_nominal_transfers_are_caught_by_the_median_check(self):
         """A $1 quitclaim flood would otherwise look like abundant data."""
         comps = [
-            CompSale(pin=str(i), sale_date=date(2026, 1, 1), sale_price=1,
+            CompSale(parcel_id=str(i), county="Test County",
+                     sale_date=date(2026, 1, 1), sale_price=1,
                      property_type="single_family", latitude=41.9, longitude=-87.6,
                      building_sqft=2000.0, beds=3, full_baths=2)
             for i in range(5_000)
@@ -364,11 +374,8 @@ class TestPropertyTypeScoping:
 
     def test_type_filter_reaches_the_sales_query(self):
         client = FakeSocrataClient({"wvhk-k5uv": []})
-        fetch_comp_sales(
-            client,
-            since=date(2025, 3, 19),
-            assessment_year=2026,
-            property_type="single_family",
+        CookCountyAdapter(client).fetch_comp_sales(
+            date(2025, 3, 19), limit=100, property_type="single_family"
         )
         _, params = client.calls[0]
         assert "class LIKE '2%'" in params["where"]
@@ -393,8 +400,8 @@ class TestWindowSampling:
 
     def test_stratified_pull_queries_every_month(self):
         client = FakeSocrataClient({"wvhk-k5uv": []})
-        fetch_sales(
-            client, since=date(2025, 10, 1), until=date(2026, 1, 1), limit=300
+        CookCountyAdapter(client).fetch_sales(
+            date(2025, 10, 1), until=date(2026, 1, 1), limit=300
         )
         assert len(client.calls) == 3
         # The budget is divided across months rather than spent on the newest.
@@ -402,8 +409,8 @@ class TestWindowSampling:
 
     def test_stratified_pull_bounds_each_month(self):
         client = FakeSocrataClient({"wvhk-k5uv": []})
-        fetch_sales(
-            client, since=date(2025, 10, 1), until=date(2025, 12, 1), limit=100
+        CookCountyAdapter(client).fetch_sales(
+            date(2025, 10, 1), until=date(2025, 12, 1), limit=100
         )
         first = client.calls[0][1]["where"]
         assert "sale_date >= '2025-10-01T00:00:00'" in first
@@ -411,9 +418,8 @@ class TestWindowSampling:
 
     def test_unstratified_pull_is_a_single_query(self):
         client = FakeSocrataClient({"wvhk-k5uv": []})
-        fetch_sales(
-            client, since=date(2025, 10, 1), until=date(2026, 1, 1),
-            limit=300, stratify=False,
+        CookCountyAdapter(client).fetch_sales(
+            date(2025, 10, 1), until=date(2026, 1, 1), limit=300, stratify=False,
         )
         assert len(client.calls) == 1
         assert client.calls[0][1]["limit"] == 300

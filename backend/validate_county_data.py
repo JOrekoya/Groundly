@@ -1,13 +1,15 @@
 """Step 2 go/no-go: pull real sales from a county and score the coverage.
 
-This is the only script in the project that touches the network. It answers
-one question before any model code gets written: can this county actually
-supply transaction-level sales with enough characteristics to build a comp
-model on?
+The only script in the project that touches the network. It answers one
+question before any model code gets written: can this county actually supply
+transaction-level sales with enough characteristics to build a comp model on?
 
-    python backend/validate_county_data.py
-    python backend/validate_county_data.py --months 6 --limit 1000
-    python backend/validate_county_data.py --township 70 --save comps.json
+    python backend/validate_county_data.py --county cook --property-type single_family
+    python backend/validate_county_data.py --county philadelphia
+    python backend/validate_county_data.py --county all --months 6
+
+Exits 0 when every county checked is a GO, 1 otherwise, so it can run as a
+data-drift alarm.
 """
 
 from __future__ import annotations
@@ -21,14 +23,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from app.ingestion import cook_county  # noqa: E402
-from app.ingestion.cook_county import PropertyType  # noqa: E402
+from app.ingestion.adapter import CountyAdapter  # noqa: E402
+from app.ingestion.carto import HttpCartoClient  # noqa: E402
+from app.ingestion.cook_county import DOMAIN as COOK_DOMAIN  # noqa: E402
+from app.ingestion.cook_county import CookCountyAdapter  # noqa: E402
 from app.ingestion.coverage import evaluate_county, format_report  # noqa: E402
+from app.ingestion.philadelphia import DOMAIN as PHILLY_DOMAIN  # noqa: E402
+from app.ingestion.philadelphia import PhiladelphiaAdapter  # noqa: E402
+from app.ingestion.records import CompSale, PropertyType  # noqa: E402
 from app.ingestion.socrata import HttpSocrataClient  # noqa: E402
 
-#: Assessor characteristics are published per assessment year. The current year
-#: is the right join target; an older one silently loses recent construction.
-DEFAULT_ASSESSMENT_YEAR = 2026
+COUNTY_CHOICES = ("cook", "philadelphia", "all")
 
 
 def months_ago(months: int) -> date:
@@ -36,115 +41,124 @@ def months_ago(months: int) -> date:
     return date.today() - timedelta(days=round(months * 30.44))
 
 
+def build_adapters(
+    name: str,
+    *,
+    township: str | None = None,
+    zip_code: str | None = None,
+    app_token: str | None = None,
+) -> list[CountyAdapter]:
+    """Construct the adapters for a ``--county`` choice.
+
+    County-specific options are applied here. Everything downstream works
+    through the CountyAdapter protocol and never learns which county it has,
+    which is the whole point of validating a second one.
+    """
+    adapters: list[CountyAdapter] = []
+    if name in ("cook", "all"):
+        adapters.append(
+            CookCountyAdapter(
+                HttpSocrataClient(COOK_DOMAIN, app_token=app_token),
+                township_code=township,
+            )
+        )
+    if name in ("philadelphia", "all"):
+        adapters.append(
+            PhiladelphiaAdapter(HttpCartoClient(PHILLY_DOMAIN), zip_code=zip_code)
+        )
+    return adapters
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Score a county's open sale data against the "
-        "thresholds in app/ingestion/coverage.py."
+        description="Score a county's open sale data against the thresholds "
+        "in app/ingestion/coverage.py."
     )
+    parser.add_argument("--county", choices=COUNTY_CHOICES, default="all")
     parser.add_argument("--months", type=int, default=18, help="lookback window")
     parser.add_argument(
-        "--limit", type=int, default=5000, help="max sales to pull and join"
+        "--limit", type=int, default=1800, help="max sales to pull and join"
     )
-    parser.add_argument("--township", default=None, help="Cook County township code")
     parser.add_argument(
         "--property-type",
         choices=["single_family", "condo"],
         default=None,
         help="scope to one property type (v1 targets single_family)",
     )
-    parser.add_argument(
-        "--assessment-year", type=int, default=DEFAULT_ASSESSMENT_YEAR
-    )
+    parser.add_argument("--township", default=None, help="Cook County township code")
+    parser.add_argument("--zip", dest="zip_code", default=None, help="Philadelphia zip")
     parser.add_argument("--app-token", default=None, help="Socrata app token")
     parser.add_argument("--save", type=Path, default=None, help="write comps to JSON")
     parser.add_argument(
-        "--sample", type=int, default=0, help="print N joined comps and exit"
+        "--sample", type=int, default=0, help="print N joined comps per county"
     )
     return parser
 
 
-def count_arms_length_sales(
-    client: HttpSocrataClient,
-    since: date,
-    township: str | None,
-    property_type: PropertyType | None,
-) -> int:
-    """Total matching sales in the window, before any join.
-
-    Counted separately from the pull so the join rate is measured against the
-    whole population rather than against the sample size.
-    """
-    where = cook_county.sales_where(
-        since, township_code=township, property_type=property_type
+def comp_to_row(comp: CompSale) -> dict:
+    """Flatten a comp for JSON output."""
+    row = asdict(comp)
+    row["sale_date"] = comp.sale_date.isoformat()
+    row["price_per_sqft"] = (
+        round(comp.price_per_sqft, 2) if comp.price_per_sqft else None
     )
-    rows = client.query(cook_county.SALES_DATASET, select="count(1)", where=where)
-    return int(rows[0]["count_1"]) if rows else 0
+    return row
 
 
 def main() -> int:
     args = build_parser().parse_args()
-    # argparse hands back a plain str; choices= already constrained it to
-    # the two valid values, so narrow it for the type checker.
+    # argparse hands back a plain str; choices= already constrained it to the
+    # two valid values, so narrow it for the type checker.
     property_type: PropertyType | None = args.property_type
     since = months_ago(args.months)
-    client = HttpSocrataClient(cook_county.DOMAIN, app_token=args.app_token)
 
-    label = "Cook County, IL"
-    scope = []
-    if property_type:
-        scope.append(property_type.replace("_", " "))
-    if args.township:
-        scope.append(f"township {args.township}")
-    if scope:
-        label += " - " + ", ".join(scope)
+    adapters = build_adapters(
+        args.county,
+        township=args.township,
+        zip_code=args.zip_code,
+        app_token=args.app_token,
+    )
 
     print(f"Pulling sales since {since.isoformat()} ...", file=sys.stderr)
-    try:
-        total_sales = count_arms_length_sales(
-            client, since, args.township, property_type
-        )
-        comps = cook_county.fetch_comp_sales(
-            client,
-            since=since,
-            assessment_year=args.assessment_year,
-            limit=args.limit,
-            township_code=args.township,
-            property_type=property_type,
-        )
-    except OSError as exc:
-        print(f"error: could not reach {cook_county.DOMAIN}: {exc}", file=sys.stderr)
-        return 1
+    all_go = True
+    everything: list[CompSale] = []
 
-    if args.sample:
-        for comp in comps[: args.sample]:
-            row = asdict(comp)
-            row["sale_date"] = comp.sale_date.isoformat()
-            row["price_per_sqft"] = (
-                round(comp.price_per_sqft, 2) if comp.price_per_sqft else None
+    for adapter in adapters:
+        try:
+            total = adapter.count_sales(since, property_type=property_type)
+            comps = adapter.fetch_comp_sales(
+                since, limit=args.limit, property_type=property_type
             )
-            print(json.dumps(row))
-        return 0
+        except (OSError, ValueError) as exc:
+            print(f"error: {adapter.name}: {exc}", file=sys.stderr)
+            all_go = False
+            continue
 
-    # Volume is judged on the whole window; the join rate on what was pulled.
-    report = evaluate_county(
-        label,
-        window_months=args.months,
-        sales_in_window=total_sales,
-        sales_sampled=min(total_sales, args.limit),
-        comps=comps,
-    )
-    print(format_report(report, comps))
+        everything.extend(comps)
 
-    if args.save:
-        payload = []
-        for comp in comps:
-            row = asdict(comp)
-            row["sale_date"] = comp.sale_date.isoformat()
-            payload.append(row)
-        args.save.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        print(f"  wrote {len(payload):,} comps to {args.save}\n")
+        if args.sample:
+            for comp in comps[: args.sample]:
+                print(json.dumps(comp_to_row(comp)))
+            continue
 
-    return 0 if report.verdict == "GO" else 1
+        report = evaluate_county(
+            adapter.name,
+            window_months=args.months,
+            sales_in_window=total,
+            sales_sampled=min(total, args.limit),
+            comps=comps,
+        )
+        print(format_report(report, comps))
+        all_go = all_go and report.verdict == "GO"
+
+    if args.save and everything:
+        args.save.write_text(
+            json.dumps([comp_to_row(c) for c in everything], indent=2),
+            encoding="utf-8",
+        )
+        print(f"  wrote {len(everything):,} comps to {args.save}\n")
+
+    return 0 if all_go else 1
 
 
 if __name__ == "__main__":

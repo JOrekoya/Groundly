@@ -1,7 +1,8 @@
 # County data validation — step 2 findings
 
-**Verdict: GO for Cook County, Illinois, scoped to single-family and small
-multi-family. Condominiums are out of scope for v1.**
+**Verdict: GO for both validated counties, scoped to single-family and small
+multi-family — Cook County, Illinois and Philadelphia, Pennsylvania.
+Condominiums are out of scope for v1 in Cook County.**
 
 This is the check the project spec called its biggest external risk: before
 writing any model code, confirm that real transaction-level sale prices with
@@ -167,16 +168,100 @@ roughly 0.05% of records they do not threaten the verdict, but the v1 comp
 model should trim extreme price-per-square-foot outliers rather than let them
 drag a weighted average.
 
+## Philadelphia, Pennsylvania
+
+Pennsylvania is a disclosure state. Philadelphia's Office of Property
+Assessment publishes `opa_properties_public` through Carto: **one denormalized
+table** carrying the last sale price and date alongside full characteristics, a
+street address, and a geometry column. Nothing needs joining.
+
+```
+  Philadelphia, PA - trailing 18 months
+  Arms-length sales in window          19,925
+  Sampled and joined                    1,600  ( 88.9% of 1,800)
+  Building size present                 99.9%
+  Bedrooms present                      90.2%
+  Bathrooms present                     88.6%
+  Coordinates present                  100.0%
+  Median sale price                  $260,000
+  Median price per sq ft                 $210
+  VERDICT                                  GO
+```
+
+19,925 sales clears the 2,000 threshold by 10x. Data runs to **2026-09-02**, a
+lag of about two weeks — fresher than Cook County's two months.
+
+### Why it was worth adding
+
+Philadelphia differs from Cook County in nearly every mechanical respect, which
+is what makes it a real test of the adapter boundary rather than a second copy
+of the same work:
+
+| | Cook County | Philadelphia |
+|---|---|---|
+| Transport | Socrata (SoQL) | Carto (PostgreSQL) |
+| Shape | 4 datasets joined on PIN | 1 denormalized table |
+| Parcel key | 14-digit PIN | OPA account number |
+| Coordinates | `lat` / `lon` columns | PostGIS geometry column |
+| Types | everything is a string | already typed |
+| Arms-length screening | publisher-supplied flags | **none; built here** |
+| Street address | absent | included |
+
+Adding it required no change to the coverage scoring or the report. Both
+adapters satisfy one `CountyAdapter` protocol and both emit the same `CompSale`,
+so the validator drives either without knowing which it has.
+
+### Philadelphia-specific findings
+
+**No arms-length flags.** Cook County ships screening for bulk transfers,
+nominal consideration, and unusual deed types. Philadelphia ships none. Roughly
+**6,500 residential transfers** in an 18-month window record a price of $1 or
+$0 — intra-family transfers, deed corrections, sheriff activity. The adapter
+applies a $10,000 floor, deliberately matching the threshold Cook County's own
+flag uses so the two counties stay comparable.
+
+**Bathrooms are a decimal.** OPA writes 2.5 bathrooms as `2.5`; the adapter
+splits that into two full and one half.
+
+**Unknown build years are the string `'0000'`**, not null or empty.
+
+**Livable area is unreliable for a minority of records.** This is the one place
+Philadelphia is meaningfully worse than Cook County:
+
+| Check | Share of records |
+|---|---|
+| Building under 400 sq ft | 0.4% |
+| Price per sq ft over $1,000 | 1.8% |
+| Price per sq ft under $30 | 2.5% |
+
+A $780,000 sale recorded against 183 sq ft of livable area is a bad size field,
+not a real transaction. Cook County's equivalent tail was roughly 0.05%;
+Philadelphia's is about **4.3%**. Field *presence* is 100%, so the thresholds
+pass, but presence is not accuracy.
+
+**The v1 comp model must trim price-per-square-foot outliers before weighting,
+and this is now a requirement rather than a nicety.** Untrimmed, a handful of
+records with an $8,000 per square foot implied rate would distort any weighted
+average built on Philadelphia data.
+
+### Structural caveat
+
+The OPA table holds each parcel's *most recent* sale, not a transaction
+history. A property sold twice inside the window appears once, at the later
+price. For comp selection that is the correct record anyway, but Philadelphia
+cannot support repeat-sales analysis the way Cook County's full sales history
+can.
+
 ## Limits and open questions
 
 - **No rent data.** These are sale prices only. Rent estimation in phase 2
   needs a separate source, and it is not solved by this validation.
 - **Condos need a different approach** if they are ever in scope — likely a
   price-per-unit model that does not depend on bathroom counts.
-- **No second county yet.** The spec called for one or two. Cook alone clears
-  the bar for v1, but a second (Philadelphia and King County, Washington are
-  the strongest candidates) would prove the adapter boundary is real and not
-  shaped around one county's quirks.
+- **Two counties validated, both GO.** The adapter boundary is proven against
+  genuinely different sources. A third would be additive rather than
+  structural; King County, Washington (flat-file download, a third transport
+  shape) is the natural next one.
 - **No app token in use.** Unauthenticated Socrata requests get throttled,
   which is fine for validation but not for a scheduled ingestion job.
 - **Assessor characteristics are not MLS data.** Condition, finish quality and
@@ -187,15 +272,30 @@ drag a weighted average.
 ## Reproducing this
 
 ```
-python backend/validate_county_data.py --property-type single_family
+python backend/validate_county_data.py --county all --property-type single_family
+python backend/validate_county_data.py --county philadelphia
+python backend/validate_county_data.py --county cook --township 72
 ```
 
-Exit code 0 means GO, 1 means NO-GO, so this can run in CI as a data-drift
-alarm. The thresholds live in `backend/app/ingestion/coverage.py`.
+Exit code 0 means every county checked is a GO, 1 otherwise, so this can run in
+CI as a data-drift alarm. The thresholds live in
+`backend/app/ingestion/coverage.py`.
 
 ## Deviation from the spec's repo layout
 
-The spec lists `ingestion/assessor_puller.py`. The adapter is named
-`ingestion/cook_county.py` instead, because assessor schemas are entirely
-county-specific and a second county means a second module, not a branch inside
-a shared one. `ingestion/socrata.py` holds the transport the adapters share.
+The spec lists `ingestion/assessor_puller.py`. Assessor schemas are entirely
+county-specific, so each county gets its own module and the layout is:
+
+| Module | Role |
+|---|---|
+| `records.py` | County-neutral types: `CompSale`, `Sale`, field parsers |
+| `adapter.py` | The `CountyAdapter` protocol both counties satisfy |
+| `socrata.py` | SoQL transport, with a fake |
+| `carto.py` | Carto SQL transport, with a fake |
+| `cook_county.py` | `CookCountyAdapter` |
+| `philadelphia.py` | `PhiladelphiaAdapter` |
+| `coverage.py` | Go/no-go scoring, county-neutral and pure |
+
+Validating the second county is what forced this split. Before Philadelphia the
+record types lived inside `cook_county.py` and were keyed on a field called
+`pin`, which only exists in Illinois.

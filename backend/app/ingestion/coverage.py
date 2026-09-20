@@ -10,7 +10,7 @@ from __future__ import annotations
 import statistics
 from dataclasses import dataclass, field
 
-from app.ingestion.cook_county import CompSale
+from app.ingestion.records import CompSale
 
 #: Minimum arms-length sales in the window. Below this the nearest-comp model
 #: has too little to draw on once filtered by type and neighbourhood.
