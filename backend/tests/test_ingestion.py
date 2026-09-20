@@ -103,6 +103,7 @@ class TestCharacteristicsParsing:
             {"pin": "2", "char_bedrooms": "2.0", "char_unit_sf": "1198.0",
              "char_building_sf": "138960.0", "char_yrblt": "1998.0"}
         )
+        assert chars is not None
         assert chars.building_sqft == 1198.0
         assert chars.property_type == "condo"
 
@@ -110,6 +111,7 @@ class TestCharacteristicsParsing:
         """A real gap in the source, recorded so it is not mistaken for a bug."""
         chars = parse_condo({"pin": "2", "char_bedrooms": "2.0",
                              "char_unit_sf": "1198.0"})
+        assert chars is not None
         assert chars.full_baths is None
         assert chars.half_baths is None
 
@@ -238,14 +240,33 @@ class TestFetchAgainstAFake:
         assert {dataset for dataset, _ in empty.calls} == {"wvhk-k5uv"}
 
 
-def make_comps(count: int, **overrides) -> list[CompSale]:
-    defaults = dict(
-        property_type="single_family", latitude=41.9, longitude=-87.6,
-        beds=3, full_baths=2, building_sqft=2000.0, year_built=1995,
-    )
-    defaults.update(overrides)
+def make_comps(
+    count: int,
+    *,
+    sale_price: int = 400_000,
+    building_sqft: float | None = 2000.0,
+    beds: int | None = 3,
+    full_baths: int | None = 2,
+) -> list[CompSale]:
+    """Build identical comps for coverage tests.
+
+    Explicit keyword parameters rather than a **overrides dict: a dict of
+    mixed values widens every field to str | float and loses the checking
+    these fixtures exist to rely on.
+    """
     return [
-        CompSale(pin=str(i), sale_date=date(2026, 1, 1), sale_price=400_000, **defaults)
+        CompSale(
+            pin=str(i),
+            sale_date=date(2026, 1, 1),
+            sale_price=sale_price,
+            property_type="single_family",
+            latitude=41.9,
+            longitude=-87.6,
+            beds=beds,
+            full_baths=full_baths,
+            building_sqft=building_sqft,
+            year_built=1995,
+        )
         for i in range(count)
     ]
 
@@ -323,6 +344,7 @@ class TestPropertyTypeScoping:
 
     def test_single_family_excludes_the_condo_class(self):
         where = property_class_where("single_family")
+        assert where is not None
         assert "class LIKE '2%'" in where
         assert "class NOT LIKE '299'" in where
 

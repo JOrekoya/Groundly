@@ -182,6 +182,8 @@ class TestWhatIfBehaviour:
         )
         assert more_down.annual_cash_flow > base.annual_cash_flow
         assert more_down.total_cash_invested > base.total_cash_invested
+        assert base.debt_service_coverage_ratio is not None
+        assert more_down.debt_service_coverage_ratio is not None
         assert more_down.debt_service_coverage_ratio > base.debt_service_coverage_ratio
         assert more_down.cap_rate == pytest.approx(base.cap_rate)
 
@@ -202,6 +204,8 @@ class TestWhatIfBehaviour:
                 at_rate.with_changes(down_payment_rate=0.25)
             )
             loan_constant = less_down.annual_debt_service / less_down.loan_amount
+            assert less_down.cash_on_cash_return is not None
+            assert more_down.cash_on_cash_return is not None
             assert (less_down.cap_rate > loan_constant) is leverage_helps
             assert (
                 less_down.cash_on_cash_return > more_down.cash_on_cash_return
@@ -212,6 +216,10 @@ class TestWhatIfBehaviour:
         pricier = calculate_deal_metrics(
             baseline_scope.with_changes(interest_rate=0.09)
         )
+        assert base.debt_service_coverage_ratio is not None
+        assert pricier.debt_service_coverage_ratio is not None
+        assert base.break_even_monthly_rent is not None
+        assert pricier.break_even_monthly_rent is not None
         assert pricier.monthly_payment > base.monthly_payment
         assert pricier.annual_cash_flow < base.annual_cash_flow
         assert pricier.debt_service_coverage_ratio < base.debt_service_coverage_ratio

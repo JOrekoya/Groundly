@@ -346,7 +346,6 @@ def fetch_sales(
     window instead. Set it to False to deliberately take the newest sales.
     """
     until = until or date.today()
-    base_kwargs = dict(township_code=township_code, property_type=property_type)
 
     def pull(where: str, row_limit: int) -> list[dict[str, Any]]:
         return client.query(
@@ -358,13 +357,20 @@ def fetch_sales(
         )
 
     if not stratify:
-        rows = pull(sales_where(since, **base_kwargs), limit)
+        rows = pull(
+            sales_where(
+                since, township_code=township_code, property_type=property_type
+            ),
+            limit,
+        )
     else:
         windows = month_windows(since, until)
         per_window = max(1, limit // len(windows)) if windows else limit
         rows = []
         for start, end in windows:
-            where = sales_where(start, **base_kwargs)
+            where = sales_where(
+                start, township_code=township_code, property_type=property_type
+            )
             where += f" AND sale_date < '{end.isoformat()}T00:00:00'"
             rows.extend(pull(where, per_window))
 

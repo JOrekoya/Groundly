@@ -17,7 +17,7 @@ from pathlib import Path
 # script does this; the test suite gets the path from pyproject.toml instead.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from app.finance.engine import calculate_deal_metrics  # noqa: E402
+from app.finance.engine import DealMetrics, calculate_deal_metrics  # noqa: E402
 from app.state import DealScope, OperatingExpenses  # noqa: E402
 
 
@@ -51,7 +51,7 @@ def ratio(value: float | None) -> str:
     return "n/a (no debt)" if value is None else f"{value:.2f}"
 
 
-def format_report(scope: DealScope, metrics: object) -> str:
+def format_report(scope: DealScope, metrics: DealMetrics) -> str:
     m = metrics
     lines = [
         "",

@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.ingestion import cook_county  # noqa: E402
+from app.ingestion.cook_county import PropertyType  # noqa: E402
 from app.ingestion.coverage import evaluate_county, format_report  # noqa: E402
 from app.ingestion.socrata import HttpSocrataClient  # noqa: E402
 
@@ -36,7 +37,10 @@ def months_ago(months: int) -> date:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description="Score a county's open sale data against the "
+        "thresholds in app/ingestion/coverage.py."
+    )
     parser.add_argument("--months", type=int, default=18, help="lookback window")
     parser.add_argument(
         "--limit", type=int, default=5000, help="max sales to pull and join"
@@ -63,7 +67,7 @@ def count_arms_length_sales(
     client: HttpSocrataClient,
     since: date,
     township: str | None,
-    property_type: str | None,
+    property_type: PropertyType | None,
 ) -> int:
     """Total matching sales in the window, before any join.
 
@@ -79,13 +83,16 @@ def count_arms_length_sales(
 
 def main() -> int:
     args = build_parser().parse_args()
+    # argparse hands back a plain str; choices= already constrained it to
+    # the two valid values, so narrow it for the type checker.
+    property_type: PropertyType | None = args.property_type
     since = months_ago(args.months)
     client = HttpSocrataClient(cook_county.DOMAIN, app_token=args.app_token)
 
     label = "Cook County, IL"
     scope = []
-    if args.property_type:
-        scope.append(args.property_type.replace("_", " "))
+    if property_type:
+        scope.append(property_type.replace("_", " "))
     if args.township:
         scope.append(f"township {args.township}")
     if scope:
@@ -94,7 +101,7 @@ def main() -> int:
     print(f"Pulling sales since {since.isoformat()} ...", file=sys.stderr)
     try:
         total_sales = count_arms_length_sales(
-            client, since, args.township, args.property_type
+            client, since, args.township, property_type
         )
         comps = cook_county.fetch_comp_sales(
             client,
@@ -102,7 +109,7 @@ def main() -> int:
             assessment_year=args.assessment_year,
             limit=args.limit,
             township_code=args.township,
-            property_type=args.property_type,
+            property_type=property_type,
         )
     except OSError as exc:
         print(f"error: could not reach {cook_county.DOMAIN}: {exc}", file=sys.stderr)
