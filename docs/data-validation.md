@@ -82,19 +82,23 @@ Scoped to single-family, the live run reports:
 
 ```
   Arms-length sales in window          45,421
-  Sampled and joined                    1,493  ( 99.5% of 1,500)
+  Sampled and joined                    1,587  ( 88.2% of 1,800)
   Building size present                100.0%
   Bedrooms present                     100.0%
   Bathrooms present                    100.0%
   Coordinates present                  100.0%
-  Median sale price                  $419,900
-  Median price per sq ft                 $274
+  Median sale price                  $390,000
+  Median price per sq ft                 $247
   VERDICT                                  GO
 ```
 
-A $419,900 median against a Chicago-area market is plausible, and $274 per
+A $390,000 median against a Chicago-area market is plausible, and $247 per
 square foot is in the right band. Both are sanity checks on the arms-length
 filter: a broken filter shows up as a median in the low tens of thousands.
+
+Note the join rate is 88%, not the 99% an earlier run reported. That earlier
+figure was wrong, and the reason is worth recording — see the sampling trap
+below.
 
 ## Traps found along the way
 
@@ -115,12 +119,53 @@ rather than defaulting silently.
 **Every value arrives as a string**, including numbers, and bedroom counts come
 through as `"3.0"`, which `int()` rejects outright.
 
+**Sorting by date and taking the first N is not a sample of the window.** The
+first version of this validator pulled sales ordered by date descending, so an
+18-month window was in fact measured on the most recent 2.5 months, and
+reported a 99.5% join rate. The true figure across the window is 88%.
+
+The cause is that assessor characteristics are published per assessment year,
+so a parcel's presence in the current year's file decays slightly as a sale
+ages:
+
+| Sale month | Size join | Geo join |
+|---|---|---|
+| 2025-04 (oldest) | 96% | 98% |
+| 2025-10 (mid) | 98% | 99% |
+| 2026-06 (recent) | 99% | 100% |
+
+The gradient is mild and every point clears the thresholds, so the GO verdict
+is unaffected — but the reported number was flattering rather than true. The
+pull is now stratified across the calendar months of the window.
+
 ## Class codes
 
 Cook County's 200 series is residential. Class 299 is specifically
 condominium; everything else in the series is houses and small apartment
 buildings. Class 211 (two-to-six unit buildings, 6,498 sales) is included
 deliberately — small multi-family is core to the investor audience.
+
+## Distribution checks
+
+Beyond medians, a 3,977-sale pull was audited for the failure modes a median
+hides:
+
+| Field | min | p1 | p50 | p99 | max |
+|---|---|---|---|---|---|
+| Building sq ft | 522 | 756 | 1,543 | 6,411 | 19,948 |
+| Sale price | $20,000 | $60,000 | $415,000 | $2,650,000 | $5,761,500 |
+| Price per sq ft | $8 | $42 | $272 | $901 | $2,198 |
+
+No record had zero bedrooms, zero bathrooms, or a building under 300 sq ft.
+All 3,977 coordinates fell inside the Cook County bounding box; none were
+null-island or transposed. Nineteen PINs appeared twice, which is a parcel
+genuinely selling twice inside the window rather than a duplication bug.
+
+The tails are thin but real: two sales above $1,500 per square foot and a
+minimum of $8. Those are plausible for a teardown or an unusual parcel, and at
+roughly 0.05% of records they do not threaten the verdict, but the v1 comp
+model should trim extreme price-per-square-foot outliers rather than let them
+drag a weighted average.
 
 ## Limits and open questions
 

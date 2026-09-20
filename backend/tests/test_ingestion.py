@@ -19,6 +19,8 @@ from app.ingestion.cook_county import (
     Sale,
     arms_length_where,
     fetch_comp_sales,
+    fetch_sales,
+    month_windows,
     join_sales,
     parse_condo,
     parse_location,
@@ -204,13 +206,17 @@ class TestFetchAgainstAFake:
         )
 
     def test_returns_both_property_types(self, client):
-        comps = fetch_comp_sales(client, since=date(2025, 3, 19), assessment_year=2026)
+        comps = fetch_comp_sales(
+            client, since=date(2025, 3, 19), assessment_year=2026, stratify=False
+        )
         assert {c.property_type for c in comps} == {"single_family", "condo"}
 
     def test_condos_would_be_lost_without_the_second_dataset(self, client):
         """Guards the mistake this adapter exists to avoid."""
         client.rows_by_dataset["3r7i-mrz4"] = []
-        comps = fetch_comp_sales(client, since=date(2025, 3, 19), assessment_year=2026)
+        comps = fetch_comp_sales(
+            client, since=date(2025, 3, 19), assessment_year=2026, stratify=False
+        )
         assert [c.pin for c in comps] == ["1"]
 
     def test_township_filter_reaches_the_query(self, client):
@@ -222,9 +228,14 @@ class TestFetchAgainstAFake:
         assert "township_code = '70'" in params["where"]
 
     def test_no_sales_means_no_further_queries(self):
+        """With nothing sold there is nothing to look up, so the three
+        characteristics and geo datasets must never be touched."""
         empty = FakeSocrataClient({"wvhk-k5uv": []})
-        assert fetch_comp_sales(empty, since=date(2025, 3, 19), assessment_year=2026) == []
-        assert len(empty.calls) == 1
+        assert (
+            fetch_comp_sales(empty, since=date(2025, 3, 19), assessment_year=2026)
+            == []
+        )
+        assert {dataset for dataset, _ in empty.calls} == {"wvhk-k5uv"}
 
 
 def make_comps(count: int, **overrides) -> list[CompSale]:
@@ -339,3 +350,48 @@ class TestPropertyTypeScoping:
         )
         _, params = client.calls[0]
         assert "class LIKE '2%'" in params["where"]
+
+
+class TestWindowSampling:
+    """Sorting by date and taking the first N samples the newest quarter, not
+    the window. These pin the stratified pull that fixes it."""
+
+    def test_month_windows_cover_the_range_without_gaps(self):
+        windows = month_windows(date(2025, 11, 15), date(2026, 2, 10))
+        assert windows == [
+            (date(2025, 11, 15), date(2025, 12, 1)),
+            (date(2025, 12, 1), date(2026, 1, 1)),
+            (date(2026, 1, 1), date(2026, 2, 1)),
+            (date(2026, 2, 1), date(2026, 2, 10)),
+        ]
+
+    def test_month_windows_roll_over_the_year(self):
+        windows = month_windows(date(2025, 12, 1), date(2026, 1, 1))
+        assert windows == [(date(2025, 12, 1), date(2026, 1, 1))]
+
+    def test_stratified_pull_queries_every_month(self):
+        client = FakeSocrataClient({"wvhk-k5uv": []})
+        fetch_sales(
+            client, since=date(2025, 10, 1), until=date(2026, 1, 1), limit=300
+        )
+        assert len(client.calls) == 3
+        # The budget is divided across months rather than spent on the newest.
+        assert all(params["limit"] == 100 for _, params in client.calls)
+
+    def test_stratified_pull_bounds_each_month(self):
+        client = FakeSocrataClient({"wvhk-k5uv": []})
+        fetch_sales(
+            client, since=date(2025, 10, 1), until=date(2025, 12, 1), limit=100
+        )
+        first = client.calls[0][1]["where"]
+        assert "sale_date >= '2025-10-01T00:00:00'" in first
+        assert "sale_date < '2025-11-01T00:00:00'" in first
+
+    def test_unstratified_pull_is_a_single_query(self):
+        client = FakeSocrataClient({"wvhk-k5uv": []})
+        fetch_sales(
+            client, since=date(2025, 10, 1), until=date(2026, 1, 1),
+            limit=300, stratify=False,
+        )
+        assert len(client.calls) == 1
+        assert client.calls[0][1]["limit"] == 300

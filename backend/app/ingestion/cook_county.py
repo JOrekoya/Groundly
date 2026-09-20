@@ -311,6 +311,66 @@ def _chunk(items: list[str], size: int) -> list[list[str]]:
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 
+def month_windows(since: date, until: date) -> list[tuple[date, date]]:
+    """Split a date range into calendar months, half-open on the right."""
+    windows: list[tuple[date, date]] = []
+    cursor = since.replace(day=1)
+    while cursor < until:
+        year, month = divmod(cursor.month, 12)
+        nxt = cursor.replace(year=cursor.year + year, month=month + 1, day=1)
+        windows.append((max(cursor, since), min(nxt, until)))
+        cursor = nxt
+    return windows
+
+
+def fetch_sales(
+    client: SocrataClient,
+    *,
+    since: date,
+    until: date | None = None,
+    limit: int,
+    township_code: str | None = None,
+    property_type: PropertyType | None = None,
+    stratify: bool = True,
+) -> list[Sale]:
+    """Pull sales from the window.
+
+    Sorting by date and taking the first N returns only the most recent slice,
+    which is not a sample of the window — it is a sample of last quarter. That
+    matters because assessor characteristics are published for a single
+    assessment year, so join rates decay slightly as sales age, and a
+    recency-biased sample reports a coverage figure the full window will not
+    match.
+
+    ``stratify`` spreads the pull evenly across the calendar months in the
+    window instead. Set it to False to deliberately take the newest sales.
+    """
+    until = until or date.today()
+    base_kwargs = dict(township_code=township_code, property_type=property_type)
+
+    def pull(where: str, row_limit: int) -> list[dict[str, Any]]:
+        return client.query(
+            SALES_DATASET,
+            select="pin, sale_date, sale_price, class, township_code",
+            where=where,
+            order="sale_date DESC",
+            limit=row_limit,
+        )
+
+    if not stratify:
+        rows = pull(sales_where(since, **base_kwargs), limit)
+    else:
+        windows = month_windows(since, until)
+        per_window = max(1, limit // len(windows)) if windows else limit
+        rows = []
+        for start, end in windows:
+            where = sales_where(start, **base_kwargs)
+            where += f" AND sale_date < '{end.isoformat()}T00:00:00'"
+            rows.extend(pull(where, per_window))
+
+    return [sale for sale in map(parse_sale, rows) if sale is not None]
+
+
 #: PINs per ``in (...)`` clause. Socrata rejects very long query strings.
 PIN_BATCH_SIZE = 250
 
@@ -323,6 +383,7 @@ def fetch_comp_sales(
     limit: int = 5000,
     township_code: str | None = None,
     property_type: PropertyType | None = None,
+    stratify: bool = True,
 ) -> list[CompSale]:
     """Pull arms-length sales and join them to characteristics and location.
 
@@ -330,18 +391,14 @@ def fetch_comp_sales(
     PINs that actually sold, which keeps the request volume proportional to the
     window rather than to the size of the county.
     """
-    where = sales_where(
-        since, township_code=township_code, property_type=property_type
-    )
-
-    sale_rows = client.query(
-        SALES_DATASET,
-        select="pin, sale_date, sale_price, class, township_code",
-        where=where,
-        order="sale_date DESC",
+    sales = fetch_sales(
+        client,
+        since=since,
         limit=limit,
+        township_code=township_code,
+        property_type=property_type,
+        stratify=stratify,
     )
-    sales = [sale for sale in map(parse_sale, sale_rows) if sale is not None]
     if not sales:
         return []
 
