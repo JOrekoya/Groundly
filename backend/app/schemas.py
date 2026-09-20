@@ -260,3 +260,39 @@ class ValuationResponse(BaseModel):
             notes=list(result.notes),
             comps=[WeightedCompModel.from_domain(w) for w in result.comps_used],
         )
+
+
+class ChatRequest(BaseModel):
+    """One message from the user, plus the deal it is about.
+
+    The scope travels with each message rather than living in server memory, so
+    the service stays stateless and the browser's sliders and the chat cannot
+    drift apart.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = Field(..., min_length=1, max_length=2000)
+    scope: DealScopeModel
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+
+class ChatResponse(BaseModel):
+    """The answer, the updated deal, and an honest account of what ran.
+
+    ``used_llm_for_planning`` and ``used_llm_for_narration`` are reported
+    separately because "no model was involved in this answer" is a claim this
+    project makes, and it should be checkable rather than asserted.
+    """
+
+    reply: str
+    scope: DealScopeModel
+    metrics: DealMetricsModel
+    steps: list[str] = Field(default_factory=list)
+    plan_source: str = "router"
+    used_llm_for_planning: bool = False
+    used_llm_for_narration: bool = False
+    llm_available: bool = False
+    latitude: float | None = None
+    longitude: float | None = None

@@ -177,3 +177,41 @@ table.comps .num { text-align: right; font-variant-numeric: tabular-nums; white-
 .comp-name em { display: block; font-style: normal; font-size: 11px; color: var(--muted); }
 .weight-bar { display: block; height: 8px; border-radius: 4px; background: var(--accent); min-width: 2px; }
 .table-note { margin: 10px 0 0; font-size: 11px; color: var(--muted); }
+
+.chat { display: flex; flex-direction: column; }
+.chat-head { display: flex; flex-direction: column; gap: 4px; }
+.chat-note { font-size: 11px; color: var(--muted); }
+.chat-log {
+  display: flex; flex-direction: column; gap: 10px;
+  max-height: 320px; overflow-y: auto; margin: 12px 0; padding-right: 4px;
+}
+.chat-empty { margin: 0; font-size: 12px; color: var(--muted); }
+.chat-msg { display: flex; flex-direction: column; gap: 4px; max-width: 92%; }
+.chat-user { align-self: flex-end; align-items: flex-end; }
+.chat-assistant { align-self: flex-start; }
+.chat-text {
+  padding: 8px 12px; border-radius: 10px; font-size: 13px;
+  white-space: pre-wrap; line-height: 1.45;
+}
+.chat-user .chat-text { background: var(--accent); color: #07101f; }
+.chat-assistant .chat-text { background: var(--panel-2); border: 1px solid var(--line); }
+.chat-error .chat-text { border-color: var(--bad); color: var(--bad); }
+.chat-busy .chat-text, .chat-busy { color: var(--muted); padding: 4px 12px; }
+
+.badge {
+  font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line);
+  color: var(--muted); width: fit-content;
+}
+.badge em { font-style: normal; text-transform: none; letter-spacing: 0; }
+.badge-deterministic { border-color: #22543d; color: var(--good); }
+.badge-model { border-color: #5b4a23; color: #d9a441; }
+
+.chat-suggestions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.chat-input { display: flex; gap: 8px; }
+.chat-input input {
+  flex: 1; padding: 9px 11px; background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 8px; color: var(--text); font: inherit;
+}
+.chat-input input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.chat-input button.primary { margin-top: 0; }

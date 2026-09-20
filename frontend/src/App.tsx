@@ -14,6 +14,7 @@ import {
   type DealMetrics,
   type DealScope,
 } from "./api/client";
+import { ChatPanel } from "./components/ChatPanel";
 import { DealDashboard } from "./components/DealDashboard";
 import { ScopeSliders } from "./components/ScopeSliders";
 import { ValuationPanel } from "./components/ValuationPanel";
@@ -32,6 +33,10 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [computeMs, setComputeMs] = useState<number | null>(null);
+  const [location, setLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
 
   const inFlight = useRef<AbortController | null>(null);
 
@@ -91,6 +96,12 @@ export default function App() {
 
       <main className="layout">
         <div className="column">
+          <ChatPanel
+            scope={scope}
+            onScope={setScope}
+            location={location}
+            onLocation={setLocation}
+          />
           <ScopeSliders scope={scope} onChange={setScope} />
         </div>
         <div className="column">

@@ -208,3 +208,56 @@ export async function valueProperty(
   }
   return response.json();
 }
+
+// --- Chat --------------------------------------------------------------------
+
+export interface ChatRequest {
+  message: string;
+  scope: DealScope;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
+/**
+ * One turn of conversation.
+ *
+ * The scope comes back with the reply so a chat-driven change ("set the rate
+ * to 7%") lands in the same state the sliders read from. The two `used_llm_*`
+ * flags are separate because "no model touched this answer" is a claim the
+ * product makes, and the UI shows it per message rather than asserting it.
+ */
+export interface ChatResponse {
+  reply: string;
+  scope: DealScope;
+  metrics: DealMetrics;
+  steps: string[];
+  plan_source: "router" | "planner";
+  used_llm_for_planning: boolean;
+  used_llm_for_narration: boolean;
+  llm_available: boolean;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+export async function chat(
+  request: ChatRequest,
+  signal?: AbortSignal,
+): Promise<ChatResponse> {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+    signal,
+  });
+  if (!response.ok) {
+    let detail = `Chat failed with ${response.status}`;
+    try {
+      const body = await response.json();
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      // keep the status message
+    }
+    throw new ApiError(detail);
+  }
+  return response.json();
+}

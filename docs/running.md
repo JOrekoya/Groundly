@@ -20,6 +20,17 @@ Writes `comps.json`. The API picks it up at startup. Without it the finance
 engine works exactly as before and the valuation endpoint says plainly that it
 has no comps, rather than guessing.
 
+## Configure a model (optional, for chat)
+
+```
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Without it the chat panel still answers every change, metric, summary and
+valuation the deterministic router recognises, and says so. With it, messages
+the router cannot match go to a planner and replies may be reworded. Every
+number comes from Python either way.
+
 ## Every time
 
 **Terminal 1 — the engine:**

@@ -24,8 +24,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.finance.engine import calculate_deal_metrics
+from app.chat import handle_message
+from app.executor import Session
+from app.llm import AnthropicClient, LlmClient, llm_available
+from app.router import describe
 from app.schemas import (
     AnalyzeResponse,
+    ChatRequest,
+    ChatResponse,
     DealMetricsModel,
     DealScopeModel,
     SubjectPropertyModel,
@@ -127,9 +133,58 @@ def health() -> dict[str, Any]:
     loaded = getattr(store, "comps", [])
     return {
         "status": "ok",
+        # The finance endpoints never call a model. Chat may, but only for
+        # messages the deterministic router could not match.
         "llm_in_request_path": False,
+        "llm_configured": llm_available(),
         "comps_loaded": len(loaded),
     }
+
+
+def _llm() -> LlmClient | None:
+    """A live client, or None when no credentials are configured.
+
+    Built per request rather than at import time so that adding a key does not
+    require a restart, and so the service starts cleanly without one.
+    """
+    if not llm_available():
+        return None
+    try:
+        return AnthropicClient()
+    except Exception as exc:  # pragma: no cover - depends on SDK internals
+        print(f"warning: could not construct the Anthropic client: {exc}")
+        return None
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+def chat(request: ChatRequest) -> ChatResponse:
+    """Answer one message about a deal.
+
+    The deterministic router handles most messages with no model call at all.
+    The response says which parts, if any, a model touched.
+    """
+    session = Session(
+        scope=request.scope.to_domain(),
+        latitude=request.latitude,
+        longitude=request.longitude,
+    )
+    turn = handle_message(
+        session, request.message, store=comp_store(), llm=_llm()
+    )
+    metrics = calculate_deal_metrics(session.scope)
+
+    return ChatResponse(
+        reply=turn.reply,
+        scope=DealScopeModel.from_domain(session.scope),
+        metrics=DealMetricsModel.from_domain(metrics, session.scope),
+        steps=[describe(step) for step in turn.plan.steps],
+        plan_source=turn.plan.source,
+        used_llm_for_planning=turn.used_llm_for_planning,
+        used_llm_for_narration=turn.used_llm_for_narration,
+        llm_available=llm_available(),
+        latitude=session.latitude,
+        longitude=session.longitude,
+    )
 
 
 @app.post("/api/value", response_model=ValuationResponse)
